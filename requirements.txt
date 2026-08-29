@@ -1,0 +1,36 @@
+# Core scientific stack
+numpy>=1.26
+pandas>=2.1
+scipy>=1.11
+scikit-learn>=1.4
+statsmodels>=0.14
+pyarrow>=14.0
+
+# Gradient boosting + explainability
+xgboost>=2.0
+lightgbm>=4.0
+shap>=0.44
+
+# Spatial backbone
+h3>=4.0
+shapely>=2.0
+
+# Visualisation / demo app
+folium>=0.15
+branca>=0.7
+plotly>=5.18
+streamlit>=1.30
+streamlit-folium>=0.18
+
+# Scraping pipeline (offline-optional)
+scrapy>=2.11
+requests>=2.31
+Pillow>=10.0
+imagehash>=4.3
+
+# Testing
+pytest>=7.4
+
+# Optional: spatiotemporal GNN (Tier 2). The pipeline degrades gracefully
+# to a spatial-lag ridge fallback when torch is not installed.
+# torch>=2.2  ->  pip install torch --index-url https://download.pytorch.org/whl/cpu
