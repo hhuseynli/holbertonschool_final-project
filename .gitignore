@@ -12,8 +12,8 @@ dist/
 venv/
 
 # Project data & artifacts (regenerate with `make demo`)
-data/
-artifacts/
+/data/
+/artifacts/
 *.parquet
 *.pt
 *.joblib
