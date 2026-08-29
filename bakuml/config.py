@@ -30,7 +30,9 @@ ARTIFACTS_DIR = REPO_ROOT / "artifacts"
 # H3 resolution 8 -> average hexagon area ~0.737 km^2 ("~0.73 km^2 cells").
 H3_RESOLUTION = 8
 # Coarser parent resolution used to form contiguous spatial CV blocks.
-H3_BLOCK_RESOLUTION = 5
+# Res 6 parents (~36 km^2) give ~19 contiguous blocks over the study area;
+# res 5 collapses to so few parents that folds degenerate.
+H3_BLOCK_RESOLUTION = 6
 
 # Elite centre of the price gradient (Fountain Square area, Sabail).
 CITY_CENTRE = (40.3703, 49.8403)

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="az">
+<head>
+  <meta charset="utf-8">
+  <title>Mənzillər — alqı-satqı — bina.az (offline test fixture)</title>
+  <!--
+    Structurally plausible snapshot of bina.az markup as of 2026, authored by
+    hand for the offline test-suite. It combines a listing page (cards +
+    pagination) with one embedded detail-page section so a single fixture can
+    exercise BinaSpider.parse AND BinaSpider.parse_detail.
+  -->
+</head>
+<body>
+
+  <!-- ============ listing page: advert cards ============ -->
+  <div class="items_list">
+
+    <!-- card 1: complete -->
+    <div class="items-i" data-item-id="4661288">
+      <a class="item_link" href="/items/4661288"></a>
+      <div class="price">
+        <span class="price-val">150 000</span>
+        <span class="price-cur">AZN</span>
+      </div>
+      <ul class="name">
+        <li>3 otaqlı</li>
+        <li>85.5 m²</li>
+        <li>4/9 mərtəbə</li>
+      </ul>
+      <div class="location">Yasamal r.</div>
+      <div class="city_when">Bakı, Bugün, 14:32</div>
+    </div>
+
+    <!-- card 2: no-break-space thousands separator, relative date "dünən" -->
+    <div class="items-i" data-item-id="4661302">
+      <a class="item_link" href="/items/4661302"></a>
+      <div class="price">
+        <span class="price-val">98&nbsp;500</span>
+        <span class="price-cur">AZN</span>
+      </div>
+      <ul class="name">
+        <li>2 otaqlı</li>
+        <li>62 m²</li>
+        <li>7/17 mərtəbə</li>
+      </ul>
+      <div class="location">Nərimanov r.</div>
+      <div class="city_when">Bakı, dünən</div>
+    </div>
+
+    <!-- card 3: price block missing entirely (selector-guard case) -->
+    <div class="items-i" data-item-id="4661417">
+      <a class="item_link" href="/items/4661417"></a>
+      <ul class="name">
+        <li>1 otaqlı</li>
+        <li>38 m²</li>
+      </ul>
+      <div class="location">Xətai r.</div>
+      <div class="city_when">28 Avqust 2026</div>
+    </div>
+
+    <!-- card 4: no detail link at all — the spider must skip it -->
+    <div class="items-i">
+      <div class="price">
+        <span class="price-val">75 000</span>
+        <span class="price-cur">AZN</span>
+      </div>
+      <ul class="name">
+        <li>2 otaqlı</li>
+        <li>55 m²</li>
+      </ul>
+      <div class="location">Binəqədi r.</div>
+    </div>
+
+  </div>
+
+  <!-- ============ pagination ============ -->
+  <nav class="pagination">
+    <span class="current">1</span>
+    <a class="page" href="/alqi-satqi/menziller?page=2">2</a>
+    <a class="next" rel="next" href="/alqi-satqi/menziller?page=2">Növbəti →</a>
+  </nav>
+
+  <!-- ============ detail page section (as at /items/4661288) ============ -->
+  <main class="product">
+    <h1 class="product-title">3 otaqlı yeni tikili, Yasamal r., 28 May m.</h1>
+
+    <div class="product-price__i">
+      <span class="price-val">150 000</span>
+      <span class="price-cur">AZN</span>
+    </div>
+
+    <div class="product-properties">
+      <div class="product-properties__i">
+        <label class="product-properties__i-name">Kateqoriya</label>
+        <span class="product-properties__i-value">Yeni tikili</span>
+      </div>
+      <div class="product-properties__i">
+        <label class="product-properties__i-name">Sahə</label>
+        <span class="product-properties__i-value">85.5 m²</span>
+      </div>
+      <div class="product-properties__i">
+        <label class="product-properties__i-name">Otaq sayı</label>
+        <span class="product-properties__i-value">3</span>
+      </div>
+      <div class="product-properties__i">
+        <label class="product-properties__i-name">Mərtəbə</label>
+        <span class="product-properties__i-value">4/9</span>
+      </div>
+    </div>
+
+    <div class="product-description">
+      <div class="product-description__content">
+        <p>Yasamal rayonunda, 28 May metrosuna yaxın 3 otaqlı mənzil satılır.</p>
+        <p>Təmirli, sənədlər qaydasındadır.</p>
+      </div>
+    </div>
+
+    <div id="item_map" data-lat="40.3892" data-lng="49.8156"></div>
+    <div class="product-map__left__location">Yasamal r.</div>
+
+    <div class="product-statistics">
+      <span class="product-statistics__i-text">Baxışların sayı: 154</span>
+      <span class="product-statistics__i-text">Yerləşdirilib: 28 Avqust 2026</span>
+    </div>
+
+    <div class="product-photos">
+      <img class="product-photos__img" src="https://bina.azstatic.com/uploads/full/2026/08/photo_1.jpg">
+      <img class="product-photos__img" src="https://bina.azstatic.com/uploads/full/2026/08/photo_2.jpg">
+    </div>
+  </main>
+
+</body>
+</html>
