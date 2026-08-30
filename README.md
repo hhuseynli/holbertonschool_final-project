@@ -130,8 +130,8 @@ quantities only; planted truth is never reused.
 | Check | Result |
 |---|---|
 | Walk-forward (25 splits) | MAE **210** vs naive persistence 263 AZN/m² · R² **0.71** vs 0.54 |
-| Spatial blocked CV (5 folds) | MAE **209** vs naive 247 AZN/m² — the model beats naive on *every* held-out region |
-| Conformal coverage (target 80 %) | **80.2 %** empirical q10–q90 coverage on the calibration months |
+| Spatial blocked CV (5 folds) | MAE **213** vs naive 247 AZN/m² — cross-cell features excluded so held-out regions stay airtight; the model beats naive on *every* fold |
+| Conformal coverage (target 80 %) | **75.1 %** empirical q10–q90 coverage on a final 3-month holdout never used for training *or* calibration (within sampling noise of target on ~300 rows) |
 | Spatial DiD vs planted truth | ATT **+0.069 log** (planted ramp-averaged ≈ 0.075); event-study post-ramp mean **0.088** vs planted 0.08; pre-trends ≈ 0 |
 | Dedup vs planted duplicates | **100 %** recall, 0.24 % false-positive pairs |
 
