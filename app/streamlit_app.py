@@ -488,10 +488,11 @@ with tab_val:
         conformal = metrics.get("conformal")
         if isinstance(conformal, dict) and "coverage_q10_q90" in conformal:
             st.metric(
-                "Empirical coverage of the 80% conformal interval",
+                "Held-out coverage of the 80% conformal interval",
                 f"{100.0 * float(conformal['coverage_q10_q90']):.1f} %",
-                help="Share of held-out cell-months whose true median falls "
-                "inside [q10, q90]; the CQR target is 80%.",
+                help="Share of cell-months in the final holdout window "
+                "(never used for training or calibration) whose true median "
+                "falls inside [q10, q90]; the CQR target is 80%.",
             )
 
         dataset = metrics.get("dataset")
@@ -532,8 +533,11 @@ CV** (whole H3 res-{block_res} blocks held out) to measure transfer to
 unseen neighbourhoods.
 
 **Uncertainty.** **Conformalized quantile regression** (CQR, α = 0.2):
-XGBoost quantile models calibrated on held-out later months, so the q10–q90
-band has finite-sample 80% coverage guarantees.
+XGBoost quantile models calibrated on later months, with empirical q10–q90
+coverage reported on a final never-used holdout window. The calibrated
+1-month band inherits CQR's finite-sample coverage logic; the 12/24-month
+forecast fan scales that width by √horizon — a stated random-walk
+heuristic, not a guarantee.
 
 **Causality.** The staggered metro build-out is a natural experiment:
 a **spatial difference-in-differences** around station

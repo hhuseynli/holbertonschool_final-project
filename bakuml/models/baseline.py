@@ -196,6 +196,7 @@ def evaluate_spatial_cv(
     seed: int = 0,
     block_res: int = config.H3_BLOCK_RESOLUTION,
     params: dict | None = None,
+    exclude_features: list[str] | None = None,
 ) -> dict:
     """Blocked spatial CV: hold out whole H3 parent blocks, all months.
 
@@ -205,7 +206,13 @@ def evaluate_spatial_cv(
     (possible when the cells span few parent blocks) are skipped.
     Same return structure as :func:`evaluate_walk_forward`, with per-fold
     entries under ``"splits"``.
+
+    ``exclude_features`` drops columns from the model for this evaluation
+    only: cross-cell features (e.g. neighbour price lags) carry the held-out
+    region's lagged target values into training rows at block boundaries,
+    which would soften the "never seen this neighbourhood" guarantee.
     """
+    used_cols = [c for c in feature_cols if c not in set(exclude_features or [])]
     cells = sorted(fm["h3"].unique().tolist())
     folds = spatial_block_folds(
         cells, n_folds=n_folds, block_res=block_res, seed=seed
@@ -223,8 +230,8 @@ def evaluate_spatial_cv(
             continue
         train, test = fm[train_mask], fm[test_mask]
         model = _make_model(seed, params)
-        model.fit(train[feature_cols], train[target])
-        y_pred = np.asarray(model.predict(test[feature_cols]), dtype=float)
+        model.fit(train[used_cols], train[target])
+        y_pred = np.asarray(model.predict(test[used_cols]), dtype=float)
         y_true = test[target].to_numpy(dtype=float)
         y_naive = test["lag_own_1m"].to_numpy(dtype=float)
         split_reports.append(
@@ -249,6 +256,7 @@ def evaluate_spatial_cv(
         "aggregate": _metric_dict(y_true, np.concatenate(pooled_pred)),
         "naive": _metric_dict(y_true, np.concatenate(pooled_naive)),
         "n_splits": len(split_reports),
+        "excluded_features": sorted(exclude_features or []),
     }
 
 
