@@ -356,14 +356,22 @@ class STGCNForecaster:
         z_target = (log_obs - mu) / sigma
 
         t_total, w = values.shape[0], self.window
+        # Train only where the window tail (month t-1) is genuinely observed:
+        # in sparse panels a forward-filled tail makes the "one-month"
+        # increment actually span a multi-month gap, and the skip connection
+        # would learn gap-recovery growth as per-step drift. Fall back to any
+        # observed target only if the strict pairing yields nothing.
         xs, ys, ms = [], [], []
-        for t in range(w, t_total):  # window [t-w, t) predicts month t
-            target_mask = obs[t]
-            if not target_mask.any():
-                continue
-            xs.append(z_filled[t - w : t])
-            ys.append(np.where(target_mask, z_target[t], 0.0))
-            ms.append(target_mask)
+        for require_fresh_tail in (True, False):
+            for t in range(w, t_total):  # window [t-w, t) predicts month t
+                target_mask = obs[t] & obs[t - 1] if require_fresh_tail else obs[t]
+                if not target_mask.any():
+                    continue
+                xs.append(z_filled[t - w : t])
+                ys.append(np.where(target_mask, z_target[t], 0.0))
+                ms.append(target_mask)
+            if xs:
+                break
         if not xs:
             raise ValueError(
                 f"no training windows: need > {w} months with observed targets"
@@ -498,7 +506,26 @@ class SpatialLagRidgeForecaster:
         lr: float = 1e-2,
         verbose: bool = False,
     ) -> "SpatialLagRidgeForecaster":
-        """Fit Ridge(alpha=1.0) on lagged own/neighbour log prices.
+        """Fit the persistence-anchored increment model.
+
+        The one-month log-price increment is decomposed as::
+
+            log p_t - log p_{t-1}  =  drift  +  Ridge(gap features)
+
+        * ``drift`` is the *median* of genuinely consecutive one-month
+          increments (cell observed at both t-1 and t) - a robust market
+          trend that cannot be inflated by forward-filled gaps.
+        * The Ridge (alpha=1.0, no intercept) learns spatial mean-reversion
+          from level-free gap features (each own / neighbour lag minus the
+          own 1-month lag); it captures appreciation diffusing between
+          neighbours without carrying any drift of its own.
+
+        This structure was chosen over a plain level regression after two
+        sparse-panel failure modes surfaced: stale forward-filled lags teach
+        a level model to absorb multi-month gap-recovery growth into its
+        per-step drift, and an unconstrained intercept + time term
+        extrapolates out of range - both of which an autoregressive rollout
+        compounds into wildly inflated forecasts.
 
         `epochs`, `lr` and `verbose` are accepted for interface parity with
         the STGCN and ignored (the ridge solution is closed-form).
@@ -511,19 +538,37 @@ class SpatialLagRidgeForecaster:
 
         t_total = values.shape[0]
         feats, targets = [], []
-        for t in range(self.N_LAGS, t_total):
-            target_mask = obs[t]
-            if not target_mask.any():
-                continue
-            f = self._features_at(filled[:t], t / t_total)
-            feats.append(f[target_mask])
-            targets.append(log_obs[t, target_mask])
+        # Require a genuinely consecutive (t-1, t) observation pair; fall
+        # back to any observed target only for degenerate panels with none.
+        for require_fresh in (True, False):
+            for t in range(self.N_LAGS, t_total):
+                target_mask = obs[t] & obs[t - 1] if require_fresh else obs[t]
+                if not target_mask.any():
+                    continue
+                f = self._gap_features(self._features_at(filled[:t], t / t_total))
+                own_lag1 = filled[t - 1]
+                feats.append(f[target_mask])
+                targets.append(log_obs[t, target_mask] - own_lag1[target_mask])
+            if feats:
+                break
         if not feats:
             raise ValueError("no observed targets after the first N_LAGS months")
-        self._model = Ridge(alpha=1.0).fit(np.vstack(feats), np.concatenate(targets))
+        increments = np.concatenate(targets)
+        self._drift = float(np.median(increments))
+        self._model = Ridge(alpha=1.0, fit_intercept=False).fit(
+            np.vstack(feats), increments - self._drift
+        )
         self._filled = filled
         self._fitted = True
         return self
+
+    @staticmethod
+    def _gap_features(f: np.ndarray) -> np.ndarray:
+        """Level-free gaps: [own2-own1, own3-own1, nb1-own1, nb2-own1,
+        nb3-own1]. The raw own-lag-1 column and the time column are dropped
+        (the former is the persistence anchor, the latter would extrapolate
+        out of the training range during rollout)."""
+        return f[:, 1:6] - f[:, 0:1]
 
     # -- forecasting -----------------------------------------------------------
 
@@ -539,7 +584,8 @@ class SpatialLagRidgeForecaster:
         preds: list[np.ndarray] = []
         for step in range(max(horizons)):
             f = self._features_at(seq, (t_total + step) / t_total)
-            row = self._model.predict(f)
+            # persistence anchor + market drift + spatial mean-reversion
+            row = f[:, 0] + self._drift + self._model.predict(self._gap_features(f))
             preds.append(row)
             seq = np.vstack([seq, row[None, :]])
         # ridge works in raw log space: identity de-normalisation (mu=0, sigma=1)
