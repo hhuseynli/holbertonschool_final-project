@@ -100,29 +100,51 @@ def _hypothetical_next_station() -> tuple[float, float]:
 
 
 def _node_gravity_slope(panel: pd.DataFrame, gravity: pd.Series) -> float:
-    """Estimate (from data, not planted truth) how much extra 12-month log
+    """Estimate (from data, not planted truth) how much extra monthly log
     appreciation a unit of polycentric node gravity has been buying.
-    Returns log points per gravity unit per month (floored at 0).
+
+    Two-stage estimate over the last 22 months (~the horizon on which the
+    Master Plan's polycentric phase-in should be visible): (1) per-cell OLS
+    time trend of log median price using *all* months the cell was observed
+    (>= 8 required), (2) cross-sectional regression of those trends on
+    gravity, weighted by each cell's observation count. Using every month
+    (rather than a two-endpoint difference of single-month medians) and
+    weighting by coverage keeps the estimate from being noise-dominated.
+    Floored at 0.
     """
     months = sorted(panel["month"].unique())
     if len(months) < 14:
         return 0.0
-    t1, t0 = months[-1], months[-13]
+    recent = months[-min(22, len(months) - 1):]
     wide = panel.pivot_table(
         index="h3", columns="month", values="price_azn_m2_median", aggfunc="last"
-    )
-    if t0 not in wide.columns or t1 not in wide.columns:
+    ).reindex(columns=recent)
+    t = np.arange(len(recent), dtype=float)
+    logp = np.log(wide.to_numpy(dtype=float))
+    slopes: dict[str, float] = {}
+    weights: dict[str, float] = {}
+    for i, cell in enumerate(wide.index):
+        y = logp[i]
+        ok = np.isfinite(y)
+        if ok.sum() < 8:
+            continue
+        slopes[cell] = float(np.polyfit(t[ok], y[ok], 1)[0])
+        weights[cell] = float(ok.sum())
+    if len(slopes) < 20:
         return 0.0
-    both = wide[[t0, t1]].dropna()
-    if len(both) < 20:
-        return 0.0
-    app = np.log(both[t1] / both[t0])
-    g = gravity.reindex(both.index)
-    ok = g.notna() & np.isfinite(app)
+    s = pd.Series(slopes)
+    g = gravity.reindex(s.index)
+    ok = g.notna()
     if ok.sum() < 20:
         return 0.0
-    slope = np.polyfit(g[ok].to_numpy(dtype=float), app[ok].to_numpy(dtype=float), 1)[0]
-    return float(max(slope, 0.0)) / 12.0
+    w = pd.Series(weights).reindex(s.index)
+    slope = np.polyfit(
+        g[ok].to_numpy(dtype=float),
+        s[ok].to_numpy(dtype=float),
+        1,
+        w=w[ok].to_numpy(dtype=float),
+    )[0]
+    return float(max(slope, 0.0))
 
 
 def _scenario_adjustment_log(
@@ -194,7 +216,13 @@ def run_pipeline(
     _log("temporal walk-forward evaluation...", verbose)
     wf_metrics = evaluate_walk_forward(fm, FEATURE_COLS, seed=seed)
     _log("spatial blocked CV evaluation...", verbose)
-    scv_metrics = evaluate_spatial_cv(fm, FEATURE_COLS, seed=seed)
+    # nbr_price_prev_month carries (lagged) prices of neighbouring cells;
+    # at block boundaries that would hand training rows the held-out
+    # region's target level, so the spatial holdout drops cross-cell
+    # features entirely.
+    scv_metrics = evaluate_spatial_cv(
+        fm, FEATURE_COLS, seed=seed, exclude_features=["nbr_price_prev_month"]
+    )
 
     # ------------------------------------------------------------- 6. explain
     _log("final baseline fit + SHAP...", verbose)
@@ -202,18 +230,24 @@ def run_pipeline(
     shap_sum = shap_summary(tb, fm)
 
     # ----------------------------------------------------------- 7. intervals
-    n_cal = 6
-    train_months, cal_months = months[:-n_cal], months[-n_cal:]
+    # Three-way temporal split: train | calibrate | holdout. Coverage is
+    # reported on the holdout months only - measuring it on the calibration
+    # months would be an arithmetic identity (CQR widens the band until
+    # ~(1-alpha) of calibration points fit), not a validation.
+    n_cal, n_holdout = 6, 3
+    train_months = months[: -(n_cal + n_holdout)]
+    cal_months = months[-(n_cal + n_holdout): -n_holdout]
+    holdout_months = months[-n_holdout:]
     _log("conformalized quantile regression...", verbose)
     cm = fit_cqr(
         fm, FEATURE_COLS,
         train_months=train_months, cal_months=cal_months, seed=seed,
     )
-    cal_mask = fm["month"].isin(cal_months)
-    cal_iv = predict_intervals(cm, fm.loc[cal_mask])
-    cal_cov = coverage(
-        fm.loc[cal_mask, config.TARGET_COL].to_numpy(),
-        cal_iv["q10"].to_numpy(), cal_iv["q90"].to_numpy(),
+    hold_mask = fm["month"].isin(holdout_months)
+    hold_iv = predict_intervals(cm, fm.loc[hold_mask])
+    holdout_cov = coverage(
+        fm.loc[hold_mask, config.TARGET_COL].to_numpy(),
+        hold_iv["q10"].to_numpy(), hold_iv["q90"].to_numpy(),
     )
     last_month = months[-1]
     last_mask = fm["month"] == last_month
@@ -298,13 +332,18 @@ def run_pipeline(
 
     # ---------------------------------------------------------- 10. artifacts
     _log("writing artifacts...", verbose)
-    folds = spatial_block_folds(cells, seed=seed)
+    # Same cell list / seed / defaults as evaluate_spatial_cv uses
+    # internally, so published fold labels match the evaluation; cells that
+    # never reach the feature matrix get fold -1 ("not evaluated").
+    folds = spatial_block_folds(sorted(fm["h3"].unique().tolist()), seed=seed)
     cell_feats = (
         mp.reset_index()
         .merge(metro_features(cells, last_month), on="h3")
         .merge(centroids, on="h3")
     )
-    cell_feats["cv_fold"] = cell_feats["h3"].map(folds)
+    cell_feats["cv_fold"] = (
+        cell_feats["h3"].map(folds).fillna(-1).astype(int)
+    )
 
     metrics = {
         "dataset": {
@@ -323,7 +362,9 @@ def run_pipeline(
         "conformal": {
             "alpha": 0.2,
             "calibration_months": cal_months,
-            "coverage_q10_q90": float(cal_cov),
+            "holdout_months": holdout_months,
+            # empirical coverage on months never seen in training/calibration
+            "coverage_q10_q90": float(holdout_cov),
         },
         "forecaster": type(forecaster).__name__,
         "scenario_engine": {
