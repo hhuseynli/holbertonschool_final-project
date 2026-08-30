@@ -59,6 +59,31 @@ def test_metrics_meaningful(artifacts):
     assert 0.6 <= cov <= 1.0
 
 
+def test_forecast_consistent_with_observed_history(artifacts):
+    """Guard against rollout drift: the citywide median 12-month forecast
+    appreciation must be in the same regime as the panel's own trailing
+    12-month observed change (a sparse-panel training bug once inflated
+    the ridge forecaster's drift ~4x here)."""
+    outdir, _ = artifacts
+    preds = pd.read_parquet(outdir / ARTIFACT_FILES["predictions"])
+    panel = pd.read_parquet(outdir / ARTIFACT_FILES["panel"])
+    fc = preds[(preds["scenario"] == "baseline") & (preds["horizon_months"] == 12)]
+    forecast_app = float(fc["appreciation_pct"].median())
+
+    months = sorted(panel["month"].unique())
+    wide = panel.pivot_table(
+        index="h3", columns="month", values="price_azn_m2_median", aggfunc="last"
+    )
+    t1, t0 = months[-1], months[-13]
+    both = wide[[t0, t1]].dropna()
+    observed_app = float(((both[t1] / both[t0]) - 1.0).median() * 100.0)
+
+    assert abs(forecast_app - observed_app) <= 8.0, (
+        f"12m forecast median {forecast_app:.1f}% vs observed trailing "
+        f"12m {observed_app:.1f}%"
+    )
+
+
 def test_did_artifact_recovers_planted_effect(artifacts):
     outdir, _ = artifacts
     did = json.loads((outdir / ARTIFACT_FILES["did"]).read_text())

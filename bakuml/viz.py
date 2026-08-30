@@ -161,7 +161,8 @@ def hex_layer_geojson(
 
     * ``appreciation_pct`` / ``q50`` / ``hotspot_prob`` — taken directly from
       the predictions table.
-    * ``uncertainty`` — the conformal interval width ``q90 - q10``.
+    * ``uncertainty`` — the forecast band width ``q90 - q10`` (the 1-month
+      conformal width scaled by the pipeline's √horizon heuristic).
     * ``current_price`` — each cell's *last observed* ``price_azn_m2_median``
       from the panel (the map still uses the prediction table's cell set so
       the layer geometry is stable when the user toggles metrics).

@@ -12,8 +12,8 @@ The app is a thin UI shell: all data plumbing lives in :mod:`bakuml.viz`
   line (hollow = not yet open), Master Plan 2040 polycentric nodes (stars),
   and redevelopment zones (translucent circles).
 * **Cell detail** — clicking a hexagon reveals its observed price history,
-  the conformal forecast fan (q10–q90 band around the q50 path), and its
-  static features.
+  the forecast fan (q10–q90 band around the q50 path; the calibrated
+  1-month conformal width scaled by √horizon), and its static features.
 * **Tabs** — SHAP price drivers, the spatial DiD result with its event-study
   plot, leakage-proof validation metrics, and a methodology summary.
 
@@ -34,6 +34,7 @@ import streamlit as st
 from streamlit_folium import st_folium
 
 from bakuml import config, viz
+from bakuml.data.schema import ARTIFACT_FILES
 
 st.set_page_config(layout="wide", page_title="Beyond Price Prediction - Baku")
 
@@ -68,11 +69,25 @@ _ACCENT = "#1565c0"
 
 
 @st.cache_data(show_spinner="Loading pipeline artifacts...")
-def _load_artifacts(artifacts_dir: str) -> dict:
+def _load_artifacts(artifacts_dir: str, signature: tuple) -> dict:
+    # `signature` (file mtimes) is part of the cache key so a re-run of
+    # `make demo`/`make full` is picked up on the next page interaction
+    # instead of serving stale (or permanently empty) artifacts.
     return viz.load_artifacts(Path(artifacts_dir))
 
 
-artifacts = _load_artifacts(str(config.ARTIFACTS_DIR))
+def _artifact_signature(artifacts_dir: Path) -> tuple:
+    sig = []
+    for name in sorted(set(ARTIFACT_FILES.values())):
+        p = artifacts_dir / name
+        if p.is_file():
+            sig.append((name, p.stat().st_mtime_ns))
+    return tuple(sig)
+
+
+artifacts = _load_artifacts(
+    str(config.ARTIFACTS_DIR), _artifact_signature(config.ARTIFACTS_DIR)
+)
 
 if "predictions" not in artifacts or "panel" not in artifacts:
     st.error(
@@ -285,7 +300,7 @@ def _fan_figure(hist: pd.DataFrame, forecast: pd.DataFrame, base_month: str) -> 
             fill="tonexty",
             fillcolor="rgba(21,101,192,0.18)",
             line=dict(width=0),
-            name="q10–q90 (80% conformal)",
+            name="q10–q90 (√horizon-scaled band)",
         )
     )
     fig.add_trace(
@@ -298,7 +313,7 @@ def _fan_figure(hist: pd.DataFrame, forecast: pd.DataFrame, base_month: str) -> 
         )
     )
     fig.update_layout(
-        title="Conformal forecast fan",
+        title="Forecast fan (heuristic uncertainty band)",
         yaxis=dict(title="AZN/m²"),
         margin=dict(l=10, r=10, t=40, b=10),
         height=340,
@@ -479,7 +494,10 @@ with tab_val:
             st.info("No walk-forward metrics in the artifact.")
 
         scv_table = _vs_naive_table(metrics.get("spatial_cv"))
-        st.markdown("**Spatial blocked CV** (whole H3 res-5 blocks held out)")
+        st.markdown(
+            f"**Spatial blocked CV** (whole H3 res-{config.H3_BLOCK_RESOLUTION} "
+            "blocks held out)"
+        )
         if scv_table is not None:
             st.dataframe(scv_table.style.format("{:.3f}"))
         else:

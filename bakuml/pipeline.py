@@ -138,11 +138,13 @@ def _node_gravity_slope(panel: pd.DataFrame, gravity: pd.Series) -> float:
     if ok.sum() < 20:
         return 0.0
     w = pd.Series(weights).reindex(s.index)
+    # np.polyfit multiplies residuals by w before squaring, so pass sqrt of
+    # the observation counts to weight squared residuals by count.
     slope = np.polyfit(
         g[ok].to_numpy(dtype=float),
         s[ok].to_numpy(dtype=float),
         1,
-        w=w[ok].to_numpy(dtype=float),
+        w=np.sqrt(w[ok].to_numpy(dtype=float)),
     )[0]
     return float(max(slope, 0.0))
 

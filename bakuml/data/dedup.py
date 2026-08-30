@@ -146,7 +146,11 @@ def _grid_candidate_pairs(
     cover the remaining four offsets.
     """
     finite = np.isfinite(lat) & np.isfinite(lon)
-    m_per_deg_lon = _M_PER_DEG_LAT * np.cos(np.radians(lat[finite].mean()))
+    # Use the maximum |latitude| so metres-per-degree-longitude is a
+    # guaranteed UNDER-estimate for every row: planar dx then never exceeds
+    # the true east-west distance, so no pair within max_dist_m can land in
+    # non-adjacent buckets (the documented no-loss guarantee).
+    m_per_deg_lon = _M_PER_DEG_LAT * np.cos(np.radians(np.abs(lat[finite]).max()))
     gx = np.full(lat.shape, np.iinfo(np.int64).min, dtype=np.int64)
     gy = gx.copy()
     gx[finite] = np.floor(lon[finite] * m_per_deg_lon / max_dist_m).astype(np.int64)
