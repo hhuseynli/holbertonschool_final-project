@@ -104,23 +104,40 @@ protocols as everything else (`make maup`):
 | H3 res 7 | 93.7 % | 33 | **−0.174** |
 | H3 res 8 *(documented baseline)* | 62.6 % | 5 | +0.139 |
 | H3 res 9 | 11.3 % | 2 | **−0.339** |
-| Adaptive KD-tree, ~70/cell | 46.1 % | 9 | **+0.189** |
-| **Adaptive KD-tree, ~140/cell** *(default)* | **81.6 %** | **26** | **+0.174** |
-| Adaptive KD-tree, ~280/cell | 98.5 % | 42 | +0.159 |
-| Market regions, k=120 | 98.0 % | 42 | −3.601 |
-| Market regions, k=240 | 94.8 % | 14 | −0.608 |
+| Adaptive KD-tree, ~70/cell | 46.1 % | 9 | **+0.204** |
+| **Adaptive KD-tree, ~140/cell** *(default)* | **81.6 %** | **26** | **+0.181** |
+| Adaptive KD-tree, ~280/cell | 98.5 % | 42 | +0.176 |
+| Market regions, k=120 | 94.5 % | 14 | −0.251 |
+| Market regions, k=240 | 88.4 % | 8 | +0.011 |
 
 *Skill = 1 − model MAE / naive-persistence MAE on spatially blocked CV;
 positive means the model beat "next month = last month" on regions it had
 never seen.*
 
-The decisive result is not one winning row — it is **stability**. Hexagons
-beat naive persistence at only *one* of three resolutions (skill range
-0.478, sign flipping), and "why resolution 8?" has no answer but the winning
-number. The adaptive grid is positive at every setting (range 0.030). Market
-regions win on internal homogeneity (the direct MAUP diagnostic) but
-aggregate the map into too few units for spatial CV to mean anything — an
-honest negative result, reported rather than buried.
+The decisive result is not one winning row — it is **stability across each
+family's own tuning knob**, which the study reports explicitly:
+
+| family | spatial-transfer skill range | verdict |
+|---|---|---|
+| H3 | −0.339 … +0.139 (spread 0.478) | **sign flips** — beats naive at one resolution of three |
+| Market regions | −0.251 … +0.011 (spread 0.262) | **sign flips** — never convincingly beats naive |
+| **Adaptive KD-tree** | **+0.176 … +0.204 (spread 0.028)** | positive at every setting |
+
+"Why resolution 8?" has no answer but the winning number: at res 7 and res 9
+the hexagonal model is *worse than assuming next month equals last month* on
+regions it has not seen. The adaptive grid never is.
+
+Market regions are the honest negative result of the study. They cut the map
+where prices actually change — at matched granularity their within-cell
+variance is marginally lower than hexagons' — but that homogeneity does not
+convert into transfer skill, and the sign flip across `k` means the method
+cannot be defended at any particular setting. They ship anyway, because a
+comparison that only contained the winner would not be a comparison. One
+caveat the study prints and this table cannot: the market geography is
+leakage-free in *time* (prices are cut off before the evaluation window) but
+its boundaries are still drawn using pre-cutoff prices of cells that spatial
+CV later holds out, so its skill is not strictly comparable with the
+coordinate-only candidates.
 
 Three tessellations ship behind one contract (assign / centroid /
 neighbours / boundary / block), so every downstream module is agnostic:
@@ -189,8 +206,8 @@ quantities only; planted truth is never reused.
 | Unit of analysis | adaptive KD-tree, 256 cells of ~137 listings each (chosen by `make maup`) |
 | Panel size | **6,799** usable cell-months / 3,953 training rows (H3 res-8: 4,319 / 2,600) |
 | Walk-forward (25 splits) | MAE **213** vs naive persistence 264 AZN/m² · R² **0.81** vs 0.70 |
-| Spatial blocked CV (5 folds) | MAE **209** vs naive 253 AZN/m² · R² **0.81** vs 0.72 — cross-cell features excluded so held-out regions stay airtight |
-| Conformal coverage (target 80 %) | **71.4 %** empirical q10–q90 coverage on a final 3-month holdout never used for training *or* calibration — under target and reported as measured: CQR assumes exchangeability, which a trending market violates |
+| Spatial blocked CV (5 folds) | MAE **207** vs naive 253 AZN/m² · R² **0.81** vs 0.72 — cross-cell features excluded so held-out regions stay airtight |
+| Conformal coverage (target 80 %) | **70.7 %** empirical q10–q90 coverage on a final 3-month holdout never used for training *or* calibration — under target and reported as measured, not tuned: CQR assumes exchangeability, which a trending market violates |
 | Spatial DiD vs planted truth | ATT **+0.069 log** (planted ramp-averaged ≈ 0.075); event-study post-ramp mean **0.088** vs planted 0.08; pre-trends ≈ 0 |
 | Dedup vs planted duplicates | **100 %** recall, 0.24 % false-positive pairs |
 
