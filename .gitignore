@@ -27,3 +27,4 @@ venv/
 # Scrapy
 .scrapy/
 httpcache/
+data/cache/
