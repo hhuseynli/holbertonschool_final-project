@@ -136,12 +136,30 @@ rayon centroid is never mistaken for a measured point.
 
 Since the whole spatial layer would be meaningless with every listing in a
 rayon collapsed onto one coordinate, `sources/geocode.py` resolves street
-addresses through **OSM Nominatim** — at one request per second, cached,
-capped per run, as its usage policy requires. Measured against the live
-feed, a bina.az address *with* its house number usually misses while the
-bare street name hits, so the geocoder runs a cascade (full address →
-street → named micro-location) and records which precision each row got.
-The match rate is reported, never assumed.
+addresses through **OSM Nominatim** — one request per second, cached, capped
+per run, as its usage policy requires. A bina.az address *with* its house
+number often misses while the bare street name hits, so the geocoder runs a
+cascade (full address → street → named micro-location) and labels each row
+with the precision it actually achieved.
+
+Measured on 200 real adverts (181 distinct addresses), **61.9 % of addresses
+resolved**:
+
+| precision | adverts | meaning |
+|---|---|---|
+| `address` | 15 | house number matched |
+| `street` | 64 | street centreline |
+| `locality` | 42 | named quarter — the fallback, ~neighbourhood accuracy |
+| `district_centroid` | 79 | unresolved; kept the rayon centroid |
+
+So **79 of 200 adverts (40 %) get a street-or-better point**, 42 more land at
+neighbourhood accuracy, and the rest stay explicitly coarse. `geo_confidence`
+carries this downstream so a rayon centroid is never weighted like a matched
+building. Note that precision describes *what the query was*, not where it
+sat in the cascade — an early hit on a street name without a house number is
+street precision, not address precision. Labelling every hit "street" (the
+first version of this module) made two different streets in one quarter share
+coordinates while both claimed street accuracy.
 
 ### Platforms that refused
 
