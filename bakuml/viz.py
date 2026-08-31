@@ -104,7 +104,7 @@ def load_artifacts(artifacts_dir: Path = config.ARTIFACTS_DIR) -> dict:
             continue
         if fname.endswith(".parquet"):
             out[key] = pd.read_parquet(path)
-        elif fname.endswith(".json"):
+        elif fname.endswith((".json", ".geojson")):
             out[key] = json.loads(path.read_text())
     return out
 
@@ -146,15 +146,19 @@ def hex_layer_geojson(
     scenario: str,
     horizon: int,
     metric: str,
+    geometry: dict | None = None,
 ) -> tuple[dict, bcm.LinearColormap]:
     """Build the map layer for one (scenario, horizon, metric) combination.
 
     Filters `predictions` to the requested scenario and horizon, derives the
     metric value per cell, and returns
 
-    * a GeoJSON FeatureCollection (via :func:`spatial.grid.cells_to_geojson`)
-      where every feature carries ``properties["value"]`` (float, drives the
-      fill colour) and ``properties["label"]`` (pretty string for tooltips);
+    * a GeoJSON FeatureCollection where every feature carries
+      ``properties["value"]`` (float, drives the fill colour) and
+      ``properties["label"]`` (pretty string for tooltips). Geometry comes
+      from the run's ``cell_geometry`` artifact when supplied - cells may
+      come from a fitted tessellation the caller cannot reconstruct - and
+      otherwise from the active tessellation;
     * a ``branca.colormap.LinearColormap`` with robust bounds and a palette
       matched to the metric's semantics (see :data:`METRIC_SPECS`).
 
@@ -202,8 +206,34 @@ def hex_layer_geojson(
     properties = {
         cell: {"value": float(v), "label": fmt(float(v))} for cell, v in values.items()
     }
-    geojson = cells_to_geojson(list(values.index), properties=properties)
+    cells = list(values.index)
+    if geometry is not None:
+        geojson = _subset_geometry(geometry, cells, properties)
+    else:
+        geojson = cells_to_geojson(cells, properties=properties)
     return geojson, colormap
+
+
+def _subset_geometry(geometry: dict, cells: list[str], properties: dict) -> dict:
+    """Take the stored polygons for `cells` and attach metric properties."""
+    by_id = {
+        feat.get("id") or (feat.get("properties") or {}).get("h3"): feat
+        for feat in geometry.get("features", [])
+    }
+    features = []
+    for cell in cells:
+        feat = by_id.get(cell)
+        if feat is None:  # cell absent from the stored geometry - skip it
+            continue
+        features.append(
+            {
+                "type": "Feature",
+                "id": cell,
+                "geometry": feat["geometry"],
+                "properties": {"h3": cell, **properties.get(cell, {})},
+            }
+        )
+    return {"type": "FeatureCollection", "features": features}
 
 
 def zone_layer_geojson(
@@ -214,6 +244,7 @@ def zone_layer_geojson(
     scenario: str,
     horizon: int,
     metric: str,
+    geometry: dict | None = None,
 ) -> tuple[dict, bcm.LinearColormap]:
     """Build a zone-level choropleth layer (merged hex polygons).
 
@@ -279,7 +310,9 @@ def zone_layer_geojson(
         zid: {"value": v, "label": fmt(v)}
         for zid, v in zone_vals.items()
     }
-    geojson = zones_to_geojson(zone_df, zone_values=zone_properties)
+    geojson = zones_to_geojson(
+        zone_df, zone_values=zone_properties, geometry=geometry
+    )
     return geojson, colormap
 
 

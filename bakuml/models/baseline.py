@@ -18,8 +18,10 @@ Evaluation happens along both axes on which the study could leak:
   markets; reporting the model only relative to it keeps the headline
   numbers honest.
 * **Spatial** - ``evaluate_spatial_cv`` holds out whole contiguous blocks of
-  H3 cells (``bakuml.validation.spatial_cv``) across *all* months, measuring
-  how well the model transfers to neighbourhoods it has never seen.
+  cells (``bakuml.validation.spatial_cv``) across *all* months, measuring
+  how well the model transfers to neighbourhoods it has never seen. Blocks
+  come from whichever tessellation is active, so the protocol is identical
+  across units of analysis.
 
 Explainability uses TreeSHAP: XGBoost computes exact per-feature Shapley
 contributions natively (``Booster.predict(pred_contribs=True)``), so no
@@ -194,11 +196,14 @@ def evaluate_spatial_cv(
     target: str = config.TARGET_COL,
     n_folds: int = 5,
     seed: int = 0,
-    block_res: int = config.H3_BLOCK_RESOLUTION,
+    block_res: int | None = None,
     params: dict | None = None,
     exclude_features: list[str] | None = None,
 ) -> dict:
-    """Blocked spatial CV: hold out whole H3 parent blocks, all months.
+    """Blocked spatial CV: hold out whole contiguous blocks, all months.
+
+    Blocks come from the active tessellation (``Tessellation.block``);
+    ``block_res`` is an H3-only shortcut for the documented baseline.
 
     Each fold's cells are fully unseen at train time (the model trains on
     the other folds across *all* months), so the score measures spatial

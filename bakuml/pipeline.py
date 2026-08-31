@@ -53,18 +53,25 @@ from bakuml.models.baseline import (
 )
 from bakuml.models.conformal import coverage, fit_cqr, predict_intervals
 from bakuml.models.stgcn import make_forecaster, panel_tensor
+from bakuml.spatial import tessellation as tess_mod
 from bakuml.spatial.graph import build_adjacency
 from bakuml.spatial.grid import (
     assign_cells,
     build_cell_month_panel,
+    cells_to_geojson,
     complete_panel,
     filter_land_cells,
 )
+from bakuml.spatial.tessellation import Tessellation
 from bakuml.spatial.zones import build_zones
 from bakuml.validation.spatial_cv import spatial_block_folds
 
 # Width of the 1-month conformal interval is scaled by sqrt(horizon) for
 # multi-month forecasts - a documented random-walk heuristic.
+#: Months withheld from price-driven tessellation fitting (>= the conformal
+#: calibration + holdout windows), so the geography stays leakage-free.
+_TESS_HOLDOUT_MONTHS = 9
+
 _Z_80 = norm.ppf(0.90)  # q10..q90 spans +/- 1.2816 sigma under normality
 
 
@@ -185,8 +192,17 @@ def run_pipeline(
     outdir=None,
     seed: int = config.SYNTHETIC_TRUTH.seed,
     verbose: bool = True,
+    tessellation: "Tessellation | str | None" = None,
 ) -> dict:
-    """Run every stage and write the app artifacts. Returns a summary dict."""
+    """Run every stage and write the app artifacts. Returns a summary dict.
+
+    ``tessellation`` picks the unit of analysis: a ``Tessellation`` instance,
+    one of the names ``tessellation.build`` accepts (``h3``, ``kdtree``,
+    ``market``), or ``None`` for ``config.TESSELLATION``. Fitted
+    tessellations are trained here on the deduplicated listings, and
+    price-driven ones are cut off before the evaluation window so the
+    geography never sees prices it will later be scored on.
+    """
     t_start = time.time()
     config.ensure_dirs()
     outdir = config.ARTIFACTS_DIR if outdir is None else outdir
@@ -204,11 +220,24 @@ def run_pipeline(
     clean, dup_map = dedupe(listings)
     _log(f"removed {len(listings) - len(clean):,} broker re-posts", verbose)
 
-    # -------------------------------------------------------------- 3. panel
+    # --------------------------------------------- 3. unit of analysis + panel
+    spec = config.TESSELLATION if tessellation is None else tessellation
+    tess = tess_mod.build(spec) if isinstance(spec, str) else spec
+    # Price-driven tessellations must not see the evaluation window, so they
+    # are cut off well before its start; coordinate-only ones ignore this.
+    all_months = sorted(clean["listed_month"].unique())
+    cutoff = (
+        all_months[-_TESS_HOLDOUT_MONTHS]
+        if len(all_months) > _TESS_HOLDOUT_MONTHS else None
+    )
+    tess.fit(clean, price_cutoff_month=cutoff)
+    previous_tess = tess_mod.set_active(tess)
+    _log(f"tessellation: {tess.describe()}", verbose)
+
     clean = assign_cells(clean)
     clean = filter_land_cells(clean)
     _log(f"filtered to {clean['h3'].nunique()} land cells "
-         f"(dropped sea hexagons)", verbose)
+         f"(dropped cells centred at sea)", verbose)
     panel = build_cell_month_panel(clean)
     months = sorted(panel["month"].unique())
     cells = sorted(panel["h3"].unique())
@@ -357,6 +386,7 @@ def run_pipeline(
     )
 
     metrics = {
+        "tessellation": tess.describe(),
         "dataset": {
             "n_listings_raw": int(len(listings)),
             "n_listings_deduped": int(len(clean)),
@@ -386,6 +416,11 @@ def run_pipeline(
         "fast_mode": fast,
     }
 
+    # Cell polygons travel with the run: the app must be able to draw a
+    # KD-tree or market-region map without refitting the tessellation.
+    (outdir / ARTIFACT_FILES["cell_geometry"]).write_text(
+        json.dumps(cells_to_geojson(cells, tess=tess))
+    )
     clean.to_parquet(outdir / ARTIFACT_FILES["listings"], index=False)
     panel.to_parquet(outdir / ARTIFACT_FILES["panel"], index=False)
     zone_df.to_parquet(outdir / ARTIFACT_FILES["zones"], index=False)
@@ -405,4 +440,5 @@ def run_pipeline(
     )
 
     _log(f"done in {metrics['runtime_seconds']}s -> {outdir}", verbose)
+    tess_mod.set_active(previous_tess)
     return metrics

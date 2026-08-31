@@ -33,20 +33,29 @@ neighbour has data yield NaN.
 
 from __future__ import annotations
 
-from functools import lru_cache
-
-import h3
 import numpy as np
 import pandas as pd
 
-
-@lru_cache(maxsize=None)
-def _neighbours(cell: str, k: int) -> tuple[str, ...]:
-    """k-ring neighbourhood of `cell`, excluding the cell itself (memoised)."""
-    return tuple(n for n in h3.grid_disk(cell, k) if n != cell)
+from bakuml.spatial import tessellation as tess_mod
+from bakuml.spatial.tessellation import Tessellation
 
 
-def _neighbour_mean_matrix(panel: pd.DataFrame, value_col: str, k: int) -> pd.DataFrame:
+def _neighbours(cell: str, k: int, tess: Tessellation | None = None) -> tuple[str, ...]:
+    """k-step neighbourhood of `cell`, excluding the cell itself.
+
+    Delegated to the active tessellation, which memoises its own adjacency:
+    H3 computes k-rings analytically, while the fitted tessellations look
+    them up in a contiguity map built once at fit time.
+    """
+    return tess_mod.resolve(tess).neighbours(cell, k)
+
+
+def _neighbour_mean_matrix(
+    panel: pd.DataFrame,
+    value_col: str,
+    k: int,
+    tess: Tessellation | None = None,
+) -> pd.DataFrame:
     """(cells x months) matrix of neighbour means of `value_col`.
 
     Entry [cell, month] is the mean of `value_col` over the cells of
@@ -61,7 +70,7 @@ def _neighbour_mean_matrix(panel: pd.DataFrame, value_col: str, k: int) -> pd.Da
     b = np.zeros((len(cells), len(cells)), dtype=float)
     for c in cells:
         i = pos[c]
-        for nb in _neighbours(c, k):
+        for nb in _neighbours(c, k, tess):
             j = pos.get(nb)
             if j is not None:
                 b[i, j] = 1.0
@@ -85,7 +94,13 @@ def _lookup(nbr: pd.DataFrame, cells: pd.Series, months: np.ndarray) -> np.ndarr
     return out
 
 
-def spatial_lag(panel: pd.DataFrame, value_col: str, k: int = 1) -> pd.Series:
+def spatial_lag(
+    panel: pd.DataFrame,
+    value_col: str,
+    k: int = 1,
+    *,
+    tess: Tessellation | None = None,
+) -> pd.Series:
     """Same-month neighbour mean of `value_col`, excluding the cell itself.
 
     Returns a float Series aligned to `panel.index`; NaN where no cell of
@@ -93,13 +108,17 @@ def spatial_lag(panel: pd.DataFrame, value_col: str, k: int = 1) -> pd.Series:
     contemporaneous values — for model features use
     `neighbour_target_encoding` instead.
     """
-    nbr = _neighbour_mean_matrix(panel, value_col, k)
+    nbr = _neighbour_mean_matrix(panel, value_col, k, tess)
     vals = _lookup(nbr, panel["h3"], panel["month"].to_numpy())
     return pd.Series(vals, index=panel.index, name=f"{value_col}_nbr_k{k}")
 
 
 def neighbour_target_encoding(
-    panel: pd.DataFrame, target_col: str, months_lag: int = 1
+    panel: pd.DataFrame,
+    target_col: str,
+    months_lag: int = 1,
+    *,
+    tess: Tessellation | None = None,
 ) -> pd.Series:
     """Neighbour mean of `target_col` taken from month `t - months_lag`.
 
@@ -115,7 +134,7 @@ def neighbour_target_encoding(
         raise ValueError(
             f"months_lag must be >= 1 to stay leakage-safe, got {months_lag}"
         )
-    nbr = _neighbour_mean_matrix(panel, target_col, k=1)
+    nbr = _neighbour_mean_matrix(panel, target_col, k=1, tess=tess)
     shifted = (
         (pd.PeriodIndex(panel["month"], freq="M") - months_lag).astype(str).to_numpy()
     )

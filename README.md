@@ -12,7 +12,7 @@ Hüseyn Hüseynli · Nihad Süleymanov · Eldəniz Arifzadə · Zeynəb Mirzəza
 
 | | A typical price model | This project |
 |---|---|---|
-| **Unit of analysis** | A listing (rows in a table) | H3 hexagonal grid cells over the whole peninsula |
+| **Unit of analysis** | A listing (rows in a table) | Spatial cells over the whole peninsula — geometry chosen by measurement, not assumed |
 | **Question asked** | "What does this flat cost today?" | "Where will the city grow — and appreciate — next?" |
 | **Time dimension** | None: one static snapshot | 12–24 month forward forecasts, walk-forward in time |
 | **Method** | Fit a regression, report R² | Causal inference (Spatial DiD) + spatiotemporal graph nets |
@@ -32,12 +32,13 @@ make demo          # end-to-end pipeline on the offline dataset (~2-4 min)
 make app           # interactive Streamlit + Folium map
 make test          # full test suite
 make full          # full-size dataset + STGCN forecaster
+make maup          # compare units of analysis (H3 vs KD-tree vs market regions)
 ```
 
-`make demo` runs every stage — data → dedup → H3 panel → features →
+`make demo` runs every stage — data → dedup → tessellation → cell panel → features →
 leakage-proof validation → SHAP → conformal intervals → STGCN forecast →
 Spatial DiD → artifacts — and drops the results into `artifacts/`, which the
-Streamlit app reads. Click any hexagon on the map to see its price history and
+Streamlit app reads. Click any cell on the map to see its price history and
 its 12/24-month forecast fan.
 
 ## Data ecosystem
@@ -83,22 +84,78 @@ new purple-line station; controls = structurally similar listings 2–6 km out;
 month + cell fixed effects; cluster-robust SEs) isolates the premium created
 purely by new transit access, with an event-study to verify pre-trends.
 
-## Spatial architecture
+## Spatial architecture: the unit of analysis is measured, not assumed
 
-- **Hexagons, not districts**: administrative rayons blend elite blocks with
-  industrial outskirts (the Modifiable Areal Unit Problem). We cast the
-  peninsula into Uber's H3 grid — resolution 8, ~0.73 km² cells, every
-  neighbour equidistant (`bakuml/spatial/`).
+Administrative rayons blend elite blocks with industrial outskirts — the
+Modifiable Areal Unit Problem (MAUP). Uber's H3 hexagons fix that much:
+uniform area, equidistant neighbours, a parent hierarchy for CV blocks. But
+hexagons only make the arbitrariness *uniform*, and a uniform grid over a
+radically non-uniform city is costly. On this panel a res-8 grid discards
+**37 %** of deduplicated listings to the thinness filter and leaves the
+median cell just **5 months** of price history — which is why forecasting
+from those cells was unstable.
+
+So the tessellation is a **parameter, not an assumption**
+(`bakuml/spatial/tessellation.py`), scored under the same leakage-proof
+protocols as everything else (`make maup`):
+
+| unit of analysis | listings kept | median months of history | spatial-transfer skill vs naive |
+|---|---|---|---|
+| H3 res 7 | 93.7 % | 33 | **−0.174** |
+| H3 res 8 *(documented baseline)* | 62.6 % | 5 | +0.139 |
+| H3 res 9 | 11.3 % | 2 | **−0.339** |
+| Adaptive KD-tree, ~70/cell | 46.1 % | 9 | **+0.189** |
+| **Adaptive KD-tree, ~140/cell** *(default)* | **81.6 %** | **26** | **+0.174** |
+| Adaptive KD-tree, ~280/cell | 98.5 % | 42 | +0.159 |
+| Market regions, k=120 | 98.0 % | 42 | −3.601 |
+| Market regions, k=240 | 94.8 % | 14 | −0.608 |
+
+*Skill = 1 − model MAE / naive-persistence MAE on spatially blocked CV;
+positive means the model beat "next month = last month" on regions it had
+never seen.*
+
+The decisive result is not one winning row — it is **stability**. Hexagons
+beat naive persistence at only *one* of three resolutions (skill range
+0.478, sign flipping), and "why resolution 8?" has no answer but the winning
+number. The adaptive grid is positive at every setting (range 0.030). Market
+regions win on internal homogeneity (the direct MAUP diagnostic) but
+aggregate the map into too few units for spatial CV to mean anything — an
+honest negative result, reported rather than buried.
+
+Three tessellations ship behind one contract (assign / centroid /
+neighbours / boundary / block), so every downstream module is agnostic:
+
+- **`h3`** — the documented hexagonal baseline, at any resolution.
+- **`kdtree`** (default) — recursive median splits of the listing cloud, so
+  every cell holds ~the same number of listings: homogeneous estimation
+  variance, far less data discarded, and real price histories in the
+  periphery. Splits use **coordinates only**, never prices, so no target
+  information enters the geography. CV blocks are KD path prefixes, which
+  are rectangles — contiguous by construction.
+- **`market`** — contiguity-constrained Ward clustering on price level and
+  building mix, so boundaries follow actual market discontinuities. The one
+  price-driven option, therefore fitted strictly on a pre-cutoff window.
+
+Switch with `--tessellation {h3,kdtree,market}` or `config.TESSELLATION`.
+Cell polygons ship in the `cell_geometry.geojson` artifact, so the app draws
+whatever geometry a run used without refitting it.
+
+- **Cells, not districts** (`bakuml/spatial/`): whichever tessellation is
+  active, listings aggregate to one row per (cell, month) with leakage-safe
+  neighbour features over its contiguity graph. Cells whose centroid falls
+  in the Caspian are dropped (`filter_land_cells`), and `zones.py` groups
+  cells into organic market micro-zones for the map — both now work over any
+  tessellation, and cluster per connected component so a "zone" is always
+  one place.
 - **Tier 1 — spatial gradient boosting**: XGBoost with spatial-lag features
   and leakage-safe neighbour target encoding (`bakuml/models/baseline.py`),
   explained with SHAP.
-- **Tier 2 — spatiotemporal GNN**: a compact STGCN over the H3 adjacency
+- **Tier 2 — spatiotemporal GNN**: a compact STGCN over the cell adjacency
   graph (`bakuml/models/stgcn.py`), with a spatial-lag ridge fallback when
   torch is unavailable.
 - **Every prediction is an interval**: conformalized quantile regression
   outputs calibrated 10th/50th/90th percentiles
-  (`bakuml/models/conformal.py`) — honest in a market spanning
-  700–7,000+ AZN/m².
+  (`bakuml/models/conformal.py`).
 
 ## Validation: random k-fold here would be academic fraud
 
@@ -129,9 +186,11 @@ quantities only; planted truth is never reused.
 
 | Check | Result |
 |---|---|
-| Walk-forward (25 splits) | MAE **210** vs naive persistence 263 AZN/m² · R² **0.71** vs 0.54 |
-| Spatial blocked CV (5 folds) | MAE **213** vs naive 247 AZN/m² — cross-cell features excluded so held-out regions stay airtight; the model beats naive on *every* fold |
-| Conformal coverage (target 80 %) | **75.1 %** empirical q10–q90 coverage on a final 3-month holdout never used for training *or* calibration (within sampling noise of target on ~300 rows) |
+| Unit of analysis | adaptive KD-tree, 256 cells of ~137 listings each (chosen by `make maup`) |
+| Panel size | **6,799** usable cell-months / 3,953 training rows (H3 res-8: 4,319 / 2,600) |
+| Walk-forward (25 splits) | MAE **213** vs naive persistence 264 AZN/m² · R² **0.81** vs 0.70 |
+| Spatial blocked CV (5 folds) | MAE **209** vs naive 253 AZN/m² · R² **0.81** vs 0.72 — cross-cell features excluded so held-out regions stay airtight |
+| Conformal coverage (target 80 %) | **71.4 %** empirical q10–q90 coverage on a final 3-month holdout never used for training *or* calibration — under target and reported as measured: CQR assumes exchangeability, which a trending market violates |
 | Spatial DiD vs planted truth | ATT **+0.069 log** (planted ramp-averaged ≈ 0.075); event-study post-ramp mean **0.088** vs planted 0.08; pre-trends ≈ 0 |
 | Dedup vs planted duplicates | **100 %** recall, 0.24 % false-positive pairs |
 
@@ -145,14 +204,14 @@ bakuml/
 ├── config.py            # geography, metro timeline, study design, scenarios
 ├── geo.py               # vectorised haversine helpers
 ├── data/                # schema, synthetic feed, dedup, Scrapy project
-├── spatial/             # H3 grid, spatial lags, adjacency graph
+├── spatial/             # tessellations, cell panel, lags, graph, zones
 ├── features/            # Master Plan 2040 + infrastructure + lag features
 ├── causal/              # Spatial DiD + event study
 ├── models/              # XGBoost+SHAP, conformal intervals, STGCN
 ├── validation/          # walk-forward + spatial blocked CV
 ├── viz.py               # pure helpers for the app
 └── pipeline.py          # end-to-end orchestration -> artifacts/
-app/streamlit_app.py     # interactive hexagon map + drilldowns
+app/streamlit_app.py     # interactive cell/zone map + drilldowns
 scripts/                 # run_pipeline / make_dataset / scrape_bina
 tests/                   # offline, deterministic; recovery-based assertions
 DESIGN.md                # binding module contracts
