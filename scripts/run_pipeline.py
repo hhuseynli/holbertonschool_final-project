@@ -6,6 +6,7 @@ Examples
 python scripts/run_pipeline.py --fast            # quick demo (~2-4 min)
 python scripts/run_pipeline.py                   # full run
 python scripts/run_pipeline.py --forecaster ridge
+python scripts/run_pipeline.py --tessellation h3      # hexagonal baseline
 """
 
 import argparse
@@ -23,12 +24,19 @@ def main() -> None:
                     help="Tier-2 forecaster (ridge = no-torch fallback)")
     ap.add_argument("--scenarios", nargs="+", default=list(config.SCENARIOS),
                     choices=list(config.SCENARIOS))
+    ap.add_argument(
+        "--tessellation", choices=["h3", "kdtree", "market"],
+        default=config.TESSELLATION,
+        help="unit of analysis (default from config.TESSELLATION); "
+             "compare options with scripts/maup_study.py",
+    )
     args = ap.parse_args()
 
     metrics = run_pipeline(
         scenarios=tuple(args.scenarios),
         fast=args.fast,
         prefer_forecaster=args.forecaster,
+        tessellation=args.tessellation,
     )
     print(json.dumps(metrics, indent=2, default=str))
 

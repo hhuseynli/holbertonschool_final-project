@@ -29,6 +29,18 @@ ARTIFACTS_DIR = REPO_ROOT / "artifacts"
 
 # H3 resolution 8 -> average hexagon area ~0.737 km^2 ("~0.73 km^2 cells").
 H3_RESOLUTION = 8
+#: Default unit of analysis. "h3" is the documented hexagonal baseline;
+#: "kdtree" adapts cell size to listing density (equal sample per cell);
+#: "market" grows contiguous, price-homogeneous regions.
+#:
+#: The default is empirical, not doctrinal: `scripts/maup_study.py` scores
+#: every candidate under the project's own leakage-proof protocols, and the
+#: adaptive grid wins on spatial transfer while retaining far more data and
+#: giving cells the price history a 12-month rollout needs. It is also
+#: *stable*: its skill barely moves across its tuning knob, where H3's
+#: swings by 0.48 and changes sign. Set to "h3" to reproduce the baseline.
+TESSELLATION = "kdtree"
+
 # Coarser parent resolution used to form contiguous spatial CV blocks.
 # Res 6 parents (~36 km^2) give ~19 contiguous blocks over the study area;
 # res 5 collapses to so few parents that folds degenerate.

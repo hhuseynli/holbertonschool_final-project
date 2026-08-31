@@ -15,7 +15,7 @@ normalisation keeps the operator's spectral radius at 1, so stacked graph
 convolutions neither explode nor vanish. Cells with no in-study neighbour
 degenerate gracefully to an identity row (degree 1 from the self loop).
 
-H3 adjacency is symmetric, hence A_hat is symmetric and every row is finite:
+Contiguity is symmetric, hence A_hat is symmetric and every row is finite:
 D's diagonal is >= 1 by the self loop, so no division by zero can occur.
 
 `edge_index` exports the same contiguity in the COO convention used by
@@ -25,23 +25,28 @@ directions; self loops are NOT included (the model adds them via A_hat).
 
 from __future__ import annotations
 
-import h3
 import numpy as np
 
+from bakuml.spatial import tessellation as tess_mod
+from bakuml.spatial.tessellation import Tessellation
 
-def _cell_order_and_edges(cells: list[str]) -> tuple[list[str], list[tuple[int, int]]]:
+
+def _cell_order_and_edges(
+    cells: list[str], tess: Tessellation | None = None
+) -> tuple[list[str], list[tuple[int, int]]]:
     """Deduplicate `cells` preserving order; list directed contiguity edges.
 
-    Both directions of every neighbour relation are returned; h3 adjacency
-    is symmetric, and adding (i, j) and (j, i) explicitly makes that
-    symmetry hold even if the h3 library ever returned an asymmetric disk.
+    Both directions of every neighbour relation are returned: contiguity is
+    symmetric, and adding (i, j) and (j, i) explicitly makes that symmetry
+    hold even if a tessellation ever reported an asymmetric neighbourhood.
     """
+    tess = tess_mod.resolve(tess)
     order = list(dict.fromkeys(cells))
     pos = {c: i for i, c in enumerate(order)}
     edges: set[tuple[int, int]] = set()
     for c in order:
         i = pos[c]
-        for nb in h3.grid_disk(c, 1):
+        for nb in tess.neighbours(c, 1):
             j = pos.get(nb)
             if j is not None and j != i:
                 edges.add((i, j))
@@ -49,7 +54,9 @@ def _cell_order_and_edges(cells: list[str]) -> tuple[list[str], list[tuple[int, 
     return order, sorted(edges)
 
 
-def build_adjacency(cells: list[str]) -> tuple[np.ndarray, list[str]]:
+def build_adjacency(
+    cells: list[str], *, tess: Tessellation | None = None
+) -> tuple[np.ndarray, list[str]]:
     """Dense symmetric normalised adjacency D^-1/2 (A + I) D^-1/2.
 
     A is the h3 neighbour (edge-sharing) relation restricted to `cells`.
@@ -57,7 +64,7 @@ def build_adjacency(cells: list[str]) -> tuple[np.ndarray, list[str]]:
     (n, n) and `cell_order` is the deduplicated cell list, in input order,
     that indexes the matrix rows/columns.
     """
-    order, edges = _cell_order_and_edges(cells)
+    order, edges = _cell_order_and_edges(cells, tess)
     n = len(order)
     a_hat = np.eye(n, dtype=np.float64)  # A + I
     for i, j in edges:
@@ -68,14 +75,14 @@ def build_adjacency(cells: list[str]) -> tuple[np.ndarray, list[str]]:
     return norm, order
 
 
-def edge_index(cells: list[str]) -> np.ndarray:
+def edge_index(cells: list[str], *, tess: Tessellation | None = None) -> np.ndarray:
     """COO edge list of the contiguity graph, shape (2, E), int64.
 
     Indices refer to the deduplicated input order (the same order
     `build_adjacency` returns). Every undirected edge appears in both
     directions, so E is even; self loops are excluded.
     """
-    _, edges = _cell_order_and_edges(cells)
+    _, edges = _cell_order_and_edges(cells, tess)
     if not edges:
         return np.zeros((2, 0), dtype=np.int64)
     return np.asarray(edges, dtype=np.int64).T
