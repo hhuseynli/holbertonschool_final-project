@@ -27,9 +27,13 @@ from __future__ import annotations
 
 import h3
 import pandas as pd
+from shapely.geometry import Point, Polygon
 
 from bakuml import config
 from bakuml.data.schema import PANEL_BASE_COLUMNS, validate_panel
+
+# Built once at import time from config; used by filter_land_cells.
+_LAND_POLY = Polygon(config.LAND_POLYGON_LONLAT)
 
 
 def assign_cells(listings: pd.DataFrame, res: int = config.H3_RESOLUTION) -> pd.DataFrame:
@@ -44,6 +48,22 @@ def assign_cells(listings: pd.DataFrame, res: int = config.H3_RESOLUTION) -> pd.
         for la, lo in zip(out["lat"].to_numpy(), out["lon"].to_numpy())
     ]
     return out
+
+
+def filter_land_cells(listings: pd.DataFrame) -> pd.DataFrame:
+    """Drop listings whose H3 cell centroid falls in the Caspian Sea.
+
+    Requires an ``h3`` column (call :func:`assign_cells` first). Checks each
+    unique cell's centroid against the simplified Absheron land polygon
+    (:data:`config.LAND_POLYGON_LONLAT`). Returns the subset of rows whose
+    cell is on land.
+    """
+    cells = listings["h3"].unique()
+    land_cells = {
+        c for c in cells
+        if _LAND_POLY.contains(Point(h3.cell_to_latlng(c)[1], h3.cell_to_latlng(c)[0]))
+    }
+    return listings[listings["h3"].isin(land_cells)].reset_index(drop=True)
 
 
 def build_cell_month_panel(

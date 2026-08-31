@@ -58,7 +58,9 @@ from bakuml.spatial.grid import (
     assign_cells,
     build_cell_month_panel,
     complete_panel,
+    filter_land_cells,
 )
+from bakuml.spatial.zones import build_zones
 from bakuml.validation.spatial_cv import spatial_block_folds
 
 # Width of the 1-month conformal interval is scaled by sqrt(horizon) for
@@ -204,11 +206,18 @@ def run_pipeline(
 
     # -------------------------------------------------------------- 3. panel
     clean = assign_cells(clean)
+    clean = filter_land_cells(clean)
+    _log(f"filtered to {clean['h3'].nunique()} land cells "
+         f"(dropped sea hexagons)", verbose)
     panel = build_cell_month_panel(clean)
     months = sorted(panel["month"].unique())
     cells = sorted(panel["h3"].unique())
     _log(f"panel: {len(cells)} cells x {len(months)} months "
          f"({len(panel):,} observed cell-months)", verbose)
+
+    # --------------------------------------------------------- 3b. micro-zones
+    zone_df = build_zones(panel, max_zones=35)
+    _log(f"built {zone_df['zone'].nunique()} market micro-zones", verbose)
 
     # ------------------------------------------------------------ 4. features
     fm = build_feature_matrix(panel)
@@ -379,6 +388,7 @@ def run_pipeline(
 
     clean.to_parquet(outdir / ARTIFACT_FILES["listings"], index=False)
     panel.to_parquet(outdir / ARTIFACT_FILES["panel"], index=False)
+    zone_df.to_parquet(outdir / ARTIFACT_FILES["zones"], index=False)
     cell_feats.to_parquet(outdir / ARTIFACT_FILES["cell_features"], index=False)
     predictions.to_parquet(outdir / ARTIFACT_FILES["predictions"], index=False)
     (outdir / ARTIFACT_FILES["metrics"]).write_text(

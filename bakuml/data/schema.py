@@ -80,6 +80,7 @@ ARTIFACT_FILES = {
     "shap": "shap_summary.json",
     "did": "did_results.json",
     "truth": "synthetic_truth.json",
+    "zones": "zones.parquet",
 }
 
 

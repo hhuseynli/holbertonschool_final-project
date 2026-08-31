@@ -40,6 +40,7 @@ import pandas as pd
 from bakuml import config
 from bakuml.data.schema import ARTIFACT_FILES
 from bakuml.spatial.grid import cells_to_geojson
+from bakuml.spatial.zones import zones_to_geojson
 
 # ---------------------------------------------------------------------------
 # Metric registry
@@ -202,6 +203,83 @@ def hex_layer_geojson(
         cell: {"value": float(v), "label": fmt(float(v))} for cell, v in values.items()
     }
     geojson = cells_to_geojson(list(values.index), properties=properties)
+    return geojson, colormap
+
+
+def zone_layer_geojson(
+    predictions: pd.DataFrame,
+    panel: pd.DataFrame,
+    zone_df: pd.DataFrame,
+    *,
+    scenario: str,
+    horizon: int,
+    metric: str,
+) -> tuple[dict, bcm.LinearColormap]:
+    """Build a zone-level choropleth layer (merged hex polygons).
+
+    Aggregates cell-level metric values to zones using listing-count-weighted
+    means, then renders merged zone polygons via
+    :func:`spatial.zones.zones_to_geojson`.
+
+    Returns the same (geojson, colormap) pair as :func:`hex_layer_geojson`.
+    """
+    if metric not in METRIC_SPECS:
+        raise ValueError(f"unknown metric {metric!r}")
+    sel = predictions[
+        (predictions["scenario"] == scenario)
+        & (predictions["horizon_months"] == int(horizon))
+    ]
+    if sel.empty:
+        raise ValueError(f"no predictions for scenario={scenario!r}, horizon={horizon}")
+    sel = sel.drop_duplicates(subset="h3", keep="last").set_index("h3")
+
+    if metric == "uncertainty":
+        cell_vals = sel["q90"] - sel["q10"]
+    elif metric == "current_price":
+        last_obs = (
+            panel.sort_values("month", kind="stable")
+            .groupby("h3")["price_azn_m2_median"]
+            .last()
+        )
+        cell_vals = last_obs.reindex(sel.index)
+    else:
+        cell_vals = sel[metric]
+
+    cell_vals = cell_vals.astype(float)
+    cell_vals = cell_vals[np.isfinite(cell_vals)]
+
+    # Listing count weights for zone aggregation
+    weights = panel.groupby("h3")["n_listings"].sum().reindex(cell_vals.index).fillna(1)
+
+    # Map cells to zones
+    z = zone_df.set_index("h3")["zone"]
+    cell_zones = z.reindex(cell_vals.index).dropna().astype(int)
+    common = cell_vals.index.intersection(cell_zones.index)
+    cell_vals = cell_vals[common]
+    cell_zones = cell_zones[common]
+    w = weights[common]
+
+    # Weighted mean per zone
+    label, palette, fmt = METRIC_SPECS[metric]
+    zone_vals = {}
+    for zid in cell_zones.unique():
+        mask = cell_zones == zid
+        wt = w[mask]
+        total_w = wt.sum()
+        if total_w > 0:
+            zone_vals[int(zid)] = float((cell_vals[mask] * wt).sum() / total_w)
+        else:
+            zone_vals[int(zid)] = float(cell_vals[mask].mean())
+
+    vals_arr = np.array(list(zone_vals.values()))
+    vmin, vmax = _robust_bounds(vals_arr, metric)
+    colormap = bcm.LinearColormap(palette, vmin=vmin, vmax=vmax, caption=label)
+
+    zone_properties = {
+        zid: {"value": v, "label": fmt(v)}
+        for zid, v in zone_vals.items()
+    }
+    geojson = zones_to_geojson(zone_df, zone_values=zone_properties)
     return geojson, colormap
 
 
