@@ -12,6 +12,11 @@ and the Streamlit app wire modules together purely through these interfaces.
 - Python 3.11, **pandas 3.0.x** (modern API only — no deprecated calls),
   **h3 v4 API** (`latlng_to_cell`, `cell_to_latlng`, `cell_to_boundary`,
   `grid_disk`, `grid_ring`, `cell_to_parent`), xgboost 3.x, sklearn 1.9.
+- **The unit of analysis is a parameter, not an assumption.** Cells come
+  from a `bakuml.spatial.tessellation.Tessellation`; pipeline code must not
+  call `h3.*` to derive geometry, contiguity or CV blocks. The panel key
+  column stays named `h3` for schema stability but holds an opaque id (an H3
+  index, a KD path `kd:0110`, or a region id `mr:0042`).
 - All constants come from `bakuml.config`; schemas from `bakuml.data.schema`;
   distances via `bakuml.geo.haversine_km` / `min_distance_km`.
 - Determinism: every stochastic step takes/uses a seed
@@ -94,7 +99,47 @@ Brokers re-post the same flat under different names: near-identical photos
 - Tests: on a synthetic sample (subset of months for speed) recover ≥ 90 % of
   `truth_info["duplicate_map"]` pairs with ≤ 2 % false positives.
 
-## 3. `bakuml/spatial/` — H3 backbone
+## 2b. `bakuml/spatial/tessellation.py` — the unit of analysis
+
+Hexagons beat administrative rayons (MAUP), but they only make the
+arbitrariness *uniform*. On this panel res-8 discards ~37 % of listings to
+the thinness filter, leaves the median cell ~5 months of history, and its
+spatial-transfer skill swings by 0.48 across resolutions 7–9 (changing
+sign). So the geometry is pluggable and the default is chosen by
+`scripts/maup_study.py`.
+
+- `Tessellation` (Protocol) — `assign(lat, lon) -> ids`,
+  `centroid(cell) -> (lat, lon)`, `neighbours(cell, k) -> tuple[str, ...]`
+  (self excluded), `boundary(cell) -> [(lat, lon), ...]` (unclosed ring),
+  `block(cell) -> str` (coarse contiguous id for spatially blocked CV).
+  Fitted implementations also expose `fit(listings, price_cutoff_month=None)`,
+  `cells()` and `describe() -> dict`.
+- `H3Tessellation(resolution, block_resolution)` — the documented baseline;
+  `fit` is a no-op.
+- `AdaptiveKDTessellation(target_per_cell, block_depth, min_span_m)` —
+  recursive median splits on **coordinates only** (no prices ⇒ no target
+  leakage) giving equal-count cells. Leaf sizes are quantised to
+  `n / 2**depth`, so `target_per_cell` selects the nearest achievable
+  partition and `describe()` reports what was achieved. `block()` truncates
+  the KD path; every prefix is a rectangle, so blocks are contiguous by
+  construction.
+- `MarketRegionTessellation(n_regions, base_resolution, n_blocks)` —
+  contiguity-constrained Ward clustering of base H3 cells on (mean log
+  price, new-build share). **The only price-driven tessellation**, so `fit`
+  must honour `price_cutoff_month`. Clusters per connected component of the
+  contiguity graph — the observed grid is disconnected (Sumgait, Alat, the
+  Absheron villages) and a disconnected connectivity matrix makes sklearn
+  silently bridge islands.
+- Module state: `get_active()` / `set_active(tess)` / `resolve(tess)` /
+  `reset_active()`, and `build(kind, **kwargs)` for `h3` / `kdtree` /
+  `market`.
+- Tests assert the shared contract for all three (total partition,
+  symmetric contiguity, monotone k-rings, closed `[lon, lat]` rings, blocks
+  coarser than cells, panel builds) plus each one's reason to exist: equal
+  counts for the KD-tree, homogeneity-at-equal-granularity and a
+  post-cutoff-price leakage canary for market regions.
+
+## 3. `bakuml/spatial/` — spatial backbone (tessellation-agnostic)
 
 - `grid.py`:
   - `assign_cells(listings, res=config.H3_RESOLUTION) -> pd.DataFrame`

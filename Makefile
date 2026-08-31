@@ -1,4 +1,4 @@
-.PHONY: install demo full test app dataset clean
+.PHONY: install demo full test app dataset maup clean
 
 install:
 	pip install -r requirements.txt
@@ -14,6 +14,11 @@ full:
 
 dataset:
 	python scripts/make_dataset.py
+
+# Compare units of analysis (H3 vs adaptive KD-tree vs market regions)
+# under the project's leakage-proof validation protocols.
+maup:
+	python scripts/maup_study.py
 
 test:
 	python -m pytest tests/ -q

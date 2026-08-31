@@ -24,36 +24,51 @@ import h3
 import numpy as np
 
 from bakuml import config
+from bakuml.spatial import tessellation as tess_mod
+from bakuml.spatial.tessellation import Tessellation
 
 
 def spatial_block_folds(
     cells: list[str],
     *,
     n_folds: int = config.SPATIAL_CV_FOLDS,
-    block_res: int = config.H3_BLOCK_RESOLUTION,
+    block_res: int | None = None,
     seed: int = 0,
+    tess: Tessellation | None = None,
 ) -> dict[str, int]:
-    """Assign every H3 cell to one of ``n_folds`` spatially blocked folds.
+    """Assign every cell to one of ``n_folds`` spatially blocked folds.
 
-    Cells sharing the same ``cell_to_parent(cell, block_res)`` parent always
-    land in the same fold.  Returns ``{cell: fold}`` with folds numbered
-    ``0..n_folds-1``; every input cell is mapped to exactly one fold.
+    Cells sharing a coarse block (``Tessellation.block``) always land in the
+    same fold, so whole contiguous regions are held out together. Returns
+    ``{cell: fold}`` with folds numbered ``0..n_folds-1``; every input cell
+    is mapped to exactly one fold.
+
+    ``block_res`` is an H3-specific shortcut retained for the documented
+    baseline: when given, blocks are H3 parents at that resolution. It is
+    mutually exclusive with ``tess``.
     """
     if n_folds < 1:
         raise ValueError("n_folds must be >= 1")
     unique_cells = sorted(set(cells))
     if not unique_cells:
         raise ValueError("cells must be non-empty")
-    if any(h3.get_resolution(c) < block_res for c in unique_cells):
-        raise ValueError(
-            f"block_res={block_res} is finer than some input cells; "
-            "it must be coarser than (or equal to) the cell resolution"
+    if block_res is not None:
+        if tess is not None:
+            raise ValueError("pass either block_res= or tess=, not both")
+        if any(h3.get_resolution(c) < block_res for c in unique_cells):
+            raise ValueError(
+                f"block_res={block_res} is finer than some input cells; "
+                "it must be coarser than (or equal to) the cell resolution"
+            )
+        tess = tess_mod.H3Tessellation(
+            max(h3.get_resolution(c) for c in unique_cells), block_res
         )
+    tess = tess_mod.resolve(tess)
 
-    # Group cells by their coarse parent block.
+    # Group cells by their coarse block.
     blocks: dict[str, list[str]] = {}
     for cell in unique_cells:
-        blocks.setdefault(h3.cell_to_parent(cell, block_res), []).append(cell)
+        blocks.setdefault(tess.block(cell), []).append(cell)
 
     # Deterministic order: descending block size, seeded shuffle within ties.
     rng = np.random.default_rng(seed)

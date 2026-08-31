@@ -75,6 +75,9 @@ ARTIFACT_FILES = {
     "listings": "listings.parquet",
     "panel": "panel.parquet",
     "cell_features": "cell_features.parquet",
+    # Cell polygons, so the app can draw whatever tessellation produced a
+    # run without knowing (or refitting) its geometry.
+    "cell_geometry": "cell_geometry.geojson",
     "predictions": "predictions.parquet",
     "metrics": "metrics.json",
     "shap": "shap_summary.json",
