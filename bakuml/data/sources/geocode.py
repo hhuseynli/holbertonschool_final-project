@@ -41,9 +41,17 @@ NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 MIN_INTERVAL_S = 1.1  # policy is 1/s; leave headroom
 CACHE_PATH = config.DATA_DIR / "cache" / "geocode.json"
 
-#: Nominatim place types we accept as street-level. A match on a whole
-#: suburb or city is not better than the district centroid we already have.
+#: Nominatim place types we accept. A match on a whole suburb or city is not
+#: better than the district centroid we already have.
 _STREET_CLASSES = {"building", "place", "highway", "amenity", "shop", "office", "tourism"}
+
+#: Rough positional confidence per precision, for downstream weighting.
+_PRECISION_CONFIDENCE = {
+    "address": 1.0,
+    "street": 0.7,
+    "locality": 0.3,
+    "district_centroid": 0.1,
+}
 
 _last_call = 0.0
 
@@ -57,15 +65,21 @@ class GeocodeResult:
     failed: int = 0
     notes: list[str] = field(default_factory=list)
 
+    by_precision: dict[str, int] = field(default_factory=dict)
+
     @property
     def match_rate(self) -> float:
         return self.matched / self.attempted if self.attempted else 0.0
 
     def report(self) -> str:
+        breakdown = ", ".join(
+            f"{k}={v}" for k, v in sorted(self.by_precision.items())
+        )
         return (
             f"geocoding: {self.matched}/{self.attempted} addresses resolved "
-            f"to street level ({100 * self.match_rate:.1f}%), "
-            f"{self.from_cache} from cache, {self.failed} unresolved"
+            f"({100 * self.match_rate:.1f}%), {self.from_cache} from cache, "
+            f"{self.failed} unresolved"
+            + (f" [{breakdown}]" if breakdown else "")
         )
 
 
@@ -92,8 +106,13 @@ def _strip_type_suffix(name: str) -> str:
     return name
 
 
-def query_variants(row: pd.Series) -> list[str]:
-    """Nominatim queries for one listing, most precise first.
+def query_variants(row: pd.Series) -> list[tuple[str, str]]:
+    """``(query, precision)`` pairs for one listing, most precise first.
+
+    The precision label describes what the query *is*, not merely where it
+    sits in the cascade: a bina.az address without a house number
+    ("Əsəd Əhmədov küç.") is street precision even though it is tried
+    first, and mislabelling it "address" would overstate the point.
 
     Measured against the real feed, a full bina.az address with a house
     number ("Məhəmməd Xiyabani küç., 196.") usually does *not* match, while
@@ -102,7 +121,11 @@ def query_variants(row: pd.Series) -> list[str]:
     the first street-level hit - which is the difference between a ~10% and
     a usable match rate.
     """
-    address = str(row.get("address") or "").strip().rstrip(".")
+    # Strip a trailing sentence period after a house number ("196." -> "196")
+    # but never the period in an Azerbaijani abbreviation: "küç." (küçəsi,
+    # street) and "pr." (prospekti) end in one, and cutting it degrades the
+    # query.
+    address = re.sub(r"(?<=\d)\.$", "", str(row.get("address") or "").strip())
     district = _strip_type_suffix(str(row.get("district") or ""))
     loc = _strip_type_suffix(str(row.get("location_name") or ""))
     tail = [p for p in (district, "Bakı", "Azərbaycan") if p]
@@ -110,20 +133,29 @@ def query_variants(row: pd.Series) -> list[str]:
     # Street name without the house number: drop trailing digits/punctuation.
     street = re.sub(r"[,\s]*\d+[a-zA-Z]?\.?$", "", address).strip().rstrip(",")
 
-    out: list[str] = []
-    for head in (address, street, loc):
+    has_number = bool(re.search(r"\d", address))
+    candidates = [
+        (address, "address" if has_number else "street"),
+        (street, "street"),
+        (loc, "locality"),
+    ]
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for head, precision in candidates:
         if not head:
             continue
         q = ", ".join([head] + [t for t in tail if t not in head])
-        if q not in out:
-            out.append(q)
+        if q in seen:
+            continue
+        seen.add(q)
+        out.append((q, precision))
     return out
 
 
 def query_string(row: pd.Series) -> str:
     """The most precise query for a listing (first cascade variant)."""
     variants = query_variants(row)
-    return variants[0] if variants else ""
+    return variants[0][0] if variants else ""
 
 
 def _lookup(query: str, *, timeout: float = 20.0) -> dict | None:
@@ -184,7 +216,7 @@ def geocode_listings(
     lat_min, lat_max, lon_min, lon_max = config.BBOX
 
     variants = out.apply(query_variants, axis=1)
-    out["geo_query"] = variants.map(lambda v: v[0] if v else "")
+    out["geo_query"] = variants.map(lambda v: v[0][0] if v else "")
 
     # One cascade per distinct address, not per advert: many adverts share a
     # building, and Nominatim's policy is about request volume.
@@ -210,23 +242,32 @@ def geocode_listings(
             return None  # only a suburb/city: no better than the centroid
         return (la, lo, str(hit.get("type") or hit.get("category") or ""))
 
-    resolved: dict[tuple, tuple[float, float, str] | None] = {}
+    resolved: dict[tuple, tuple[float, float, str, str] | None] = {}
     try:
         for i, cascade in enumerate(unique_cascades, 1):
             res.attempted += 1
             found = None
-            for q in cascade:
+            for q, precision in cascade:
                 if q in cache:
                     res.from_cache += 1
                     hit = cache[q]
                 else:
                     if budget <= 0:
-                        break
+                        # Out of network budget, but later cascades may still
+                        # be fully cached - keep going rather than stopping.
+                        continue
                     budget -= 1
                     hit = _lookup(q)
                     cache[q] = hit  # cache misses too: never retry a dead one
-                found = accept(hit)
-                if found:
+                accepted = accept(hit)
+                if accepted:
+                    # Precision must reflect WHICH query matched. A hit on
+                    # the micro-location fallback is a neighbourhood point,
+                    # not a street one - labelling it "street" would silently
+                    # overstate it, and two different streets in the same
+                    # quarter would then share coordinates.
+                    la, lo, kind = accepted
+                    found = (la, lo, kind, precision)
                     break
             resolved[cascade] = found
             res.matched += int(found is not None)
@@ -237,8 +278,6 @@ def geocode_listings(
                     f"{res.matched} matched",
                     flush=True,
                 )
-            if budget <= 0:
-                break
     finally:
         _save_cache(cache)
 
@@ -253,13 +292,21 @@ def geocode_listings(
         out.loc[hit_mask, "lon"] = (
             keys[hit_mask].map(lambda k: resolved[k][1]).astype(float)
         )
-        out.loc[hit_mask, "geo_precision"] = "street"
-        out.loc[hit_mask, "geo_confidence"] = 1.0
+        out.loc[hit_mask, "geo_precision"] = keys[hit_mask].map(
+            lambda k: resolved[k][3]
+        )
+        out.loc[hit_mask, "geo_confidence"] = keys[hit_mask].map(
+            lambda k: _PRECISION_CONFIDENCE[resolved[k][3]]
+        ).astype(float)
     miss = ~hit_mask
     if miss.any():
         out.loc[miss, "geo_precision"] = (
             out.loc[miss, "geo_precision"].replace("", "district_centroid")
         )
+    res.by_precision = {
+        str(k): int(v)
+        for k, v in out["geo_precision"].value_counts().to_dict().items()
+    }
     res.listings = out
     res.notes.append(
         f"{len(unique_cascades)} distinct addresses for {len(out)} adverts"

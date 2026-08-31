@@ -169,18 +169,38 @@ def test_query_cascade_drops_the_house_number_then_falls_back():
         }
     )
     variants = query_variants(row)
+    queries = [q for q, _p in variants]
+    precisions = [p for _q, p in variants]
     assert len(variants) >= 3
-    assert variants[0].startswith("Məhəmməd Xiyabani küç., 196")
-    assert "196" not in variants[1], "second variant must drop the house number"
-    assert variants[1].startswith("Məhəmməd Xiyabani küç.")
-    assert variants[2].startswith("Yeni Yasamal")
-    assert all(v.endswith("Azərbaycan") for v in variants)
+    assert queries[0].startswith("Məhəmməd Xiyabani küç., 196")
+    assert "196" not in queries[1], "second variant must drop the house number"
+    assert queries[1].startswith("Məhəmməd Xiyabani küç.")
+    assert queries[2].startswith("Yeni Yasamal")
+    assert all(q.endswith("Azərbaycan") for q in queries)
+    # Each variant declares what it is, so a fallback cannot claim precision
+    # it does not have.
+    assert precisions[:3] == ["address", "street", "locality"]
+    # The street abbreviation "küç." keeps its period; only the house
+    # number's trailing period is stripped.
+    assert "küç." in queries[1]
 
 
 def test_query_cascade_handles_a_missing_address():
     row = pd.Series({"address": "", "location_name": "20 Yanvar m.", "district": "Yasamal"})
     variants = query_variants(row)
-    assert variants and variants[0].startswith("20 Yanvar")
+    assert variants
+    assert variants[0][0].startswith("20 Yanvar")
+    assert variants[0][1] == "locality"
+
+
+def test_address_without_a_house_number_is_street_not_address_precision():
+    """Cascade position is not precision: a street name tried first is still
+    a street, and calling it 'address' would overstate the point."""
+    row = pd.Series(
+        {"address": "Əsəd Əhmədov küç.", "location_name": "", "district": "Yasamal"}
+    )
+    variants = query_variants(row)
+    assert variants[0][1] == "street"
 
 
 # --------------------------------------------------------------------------
@@ -306,3 +326,141 @@ def test_canonical_only_is_pipeline_ready(item_html):
     from bakuml.data.schema import validate_listings
 
     validate_listings(df)  # must satisfy the same contract as synthetic data
+
+
+# --------------------------------------------------------------------------
+# Geocoding precision must reflect which query matched
+# --------------------------------------------------------------------------
+
+
+def test_precision_reflects_which_cascade_variant_matched(monkeypatch):
+    """A hit on the micro-location fallback is not a street-level point.
+
+    Measured on the real feed, labelling every accepted hit "street" made two
+    different streets in one quarter share coordinates while both claimed
+    street precision. Precision must come from the cascade position.
+    """
+    from bakuml.data.sources import geocode
+
+    monkeypatch.setattr(geocode, "_load_cache", lambda: {})
+    monkeypatch.setattr(geocode, "_save_cache", lambda cache: None)
+
+    # Only the third variant (the micro-location) resolves.
+    def fake_lookup(query: str, **_):
+        if query.startswith("Yeni Yasamal"):
+            return {
+                "lat": "40.392724",
+                "lon": "49.791028",
+                "category": "place",
+                "type": "suburb",
+            }
+        return None
+
+    monkeypatch.setattr(geocode, "_lookup", fake_lookup)
+
+    df = pd.DataFrame(
+        [
+            {
+                "address": "Məhəmməd Xiyabani küç., 196.",
+                "location_name": "Yeni Yasamal q.",
+                "district": "Yasamal",
+                "lat": 40.379962,
+                "lon": 49.808995,
+            }
+        ]
+    )
+    res = geocode.geocode_listings(df, max_lookups=10, progress_every=0)
+    assert res.matched == 1
+    row = res.listings.iloc[0]
+    assert row["geo_precision"] == "locality", "fallback must not claim 'street'"
+    assert row["geo_confidence"] < 0.5
+    assert row["lat"] == pytest.approx(40.392724)
+
+
+def test_full_address_match_is_labelled_address_precision(monkeypatch):
+    from bakuml.data.sources import geocode
+
+    monkeypatch.setattr(geocode, "_load_cache", lambda: {})
+    monkeypatch.setattr(geocode, "_save_cache", lambda cache: None)
+    monkeypatch.setattr(
+        geocode,
+        "_lookup",
+        lambda q, **_: {
+            "lat": "40.3901",
+            "lon": "49.7911",
+            "category": "building",
+            "type": "apartments",
+        },
+    )
+    df = pd.DataFrame(
+        [{"address": "Əsəd Əhmədov küç., 12.", "location_name": "", "district": "Yasamal",
+          "lat": 40.379962, "lon": 49.808995}]
+    )
+    res = geocode.geocode_listings(df, max_lookups=5, progress_every=0)
+    assert res.listings.iloc[0]["geo_precision"] == "address"
+    assert res.listings.iloc[0]["geo_confidence"] == 1.0
+
+
+def test_unresolved_rows_keep_the_district_centroid(monkeypatch):
+    from bakuml.data.sources import geocode
+
+    monkeypatch.setattr(geocode, "_load_cache", lambda: {})
+    monkeypatch.setattr(geocode, "_save_cache", lambda cache: None)
+    monkeypatch.setattr(geocode, "_lookup", lambda q, **_: None)
+    df = pd.DataFrame(
+        [{"address": "Nowhere küç., 1.", "location_name": "", "district": "Yasamal",
+          "lat": 40.379962, "lon": 49.808995}]
+    )
+    res = geocode.geocode_listings(df, max_lookups=5, progress_every=0)
+    row = res.listings.iloc[0]
+    assert res.matched == 0
+    assert row["geo_precision"] == "district_centroid"
+    assert row["lat"] == pytest.approx(40.379962), "centroid must be preserved"
+
+
+def test_matches_outside_absheron_are_rejected(monkeypatch):
+    """Nominatim mis-parses can land in another country; a point outside the
+    study bbox is a parse failure, not a location."""
+    from bakuml.data.sources import geocode
+
+    monkeypatch.setattr(geocode, "_load_cache", lambda: {})
+    monkeypatch.setattr(geocode, "_save_cache", lambda cache: None)
+    monkeypatch.setattr(
+        geocode,
+        "_lookup",
+        lambda q, **_: {"lat": "41.7151", "lon": "44.8271",  # Tbilisi
+                        "category": "highway", "type": "residential"},
+    )
+    df = pd.DataFrame(
+        [{"address": "Somewhere küç.", "location_name": "", "district": "Yasamal",
+          "lat": 40.379962, "lon": 49.808995}]
+    )
+    res = geocode.geocode_listings(df, max_lookups=5, progress_every=0)
+    assert res.matched == 0
+    assert res.listings.iloc[0]["geo_precision"] == "district_centroid"
+
+
+def test_cached_addresses_resolve_even_with_no_network_budget(monkeypatch):
+    """max_lookups caps *network* calls; it must not stop cached resolution."""
+    from bakuml.data.sources import geocode
+
+    cached = {
+        "Əsəd Əhmədov küç., Yasamal, Bakı, Azərbaycan": {
+            "lat": "40.3941", "lon": "49.7981",
+            "category": "highway", "type": "residential",
+        }
+    }
+    monkeypatch.setattr(geocode, "_load_cache", lambda: dict(cached))
+    monkeypatch.setattr(geocode, "_save_cache", lambda cache: None)
+
+    def no_network(*_a, **_k):
+        raise AssertionError("must not hit the network when budget is 0")
+
+    monkeypatch.setattr(geocode, "_lookup", no_network)
+    df = pd.DataFrame(
+        [{"address": "Əsəd Əhmədov küç.", "location_name": "", "district": "Yasamal",
+          "lat": 40.379962, "lon": 49.808995}]
+    )
+    res = geocode.geocode_listings(df, max_lookups=0, progress_every=0)
+    assert res.matched == 1
+    assert res.listings.iloc[0]["geo_precision"] == "street"
