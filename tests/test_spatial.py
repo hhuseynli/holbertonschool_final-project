@@ -23,6 +23,7 @@ from bakuml.config import SYNTHETIC_TRUTH
 from bakuml.data.schema import PANEL_BASE_COLUMNS, month_range, validate_panel
 from bakuml.data.synthetic import generate_listings
 from bakuml.spatial import graph, grid, lags
+from bakuml.spatial.zones import build_zones, zones_to_geojson
 
 # --------------------------------------------------------------------------
 # Fixtures
@@ -338,3 +339,66 @@ def test_edge_index_empty_graph(triangle: tuple[str, str, str]) -> None:
     ei = graph.edge_index([c0, far])
     assert ei.shape == (2, 0)
     assert ei.dtype == np.int64
+
+
+# --------------------------------------------------------------------------
+# grid.py — sea filtering
+# --------------------------------------------------------------------------
+
+
+def test_filter_land_cells_rejects_sea(listings: pd.DataFrame) -> None:
+    """A synthetic listing placed in the Caspian must be dropped."""
+    assigned = grid.assign_cells(listings)
+    # Inject a sea cell: place a listing well into the Caspian
+    sea_row = assigned.iloc[[0]].copy()
+    sea_row["lat"] = 40.40
+    sea_row["lon"] = 50.50  # deep in the Caspian
+    sea_row["h3"] = h3.latlng_to_cell(40.40, 50.50, config.H3_RESOLUTION)
+    combined = pd.concat([assigned, sea_row], ignore_index=True)
+    filtered = grid.filter_land_cells(combined)
+    assert sea_row["h3"].iloc[0] not in filtered["h3"].values
+    # All original land cells survive
+    assert filtered["h3"].nunique() == assigned["h3"].nunique()
+
+
+def test_filter_land_cells_keeps_all_synthetic(listings: pd.DataFrame) -> None:
+    """Synthetic listings are all on land: no rows should be dropped."""
+    assigned = grid.assign_cells(listings)
+    filtered = grid.filter_land_cells(assigned)
+    assert len(filtered) == len(assigned)
+
+
+# --------------------------------------------------------------------------
+# zones.py — market micro-zones
+# --------------------------------------------------------------------------
+
+
+def test_build_zones_covers_all_cells(panel: pd.DataFrame) -> None:
+    zones = build_zones(panel, max_zones=15)
+    assert set(zones["h3"]) == set(panel["h3"].unique())
+    assert "zone" in zones.columns
+    assert "zone_name" in zones.columns
+    assert zones["zone"].nunique() <= 15
+
+
+def test_zones_to_geojson_structure(panel: pd.DataFrame) -> None:
+    zones = build_zones(panel, max_zones=10)
+    gj = zones_to_geojson(zones, zone_values={0: {"value": 42.0}})
+    assert gj["type"] == "FeatureCollection"
+    assert len(gj["features"]) == zones["zone"].nunique()
+    for feat in gj["features"]:
+        assert feat["geometry"]["type"] in ("Polygon", "MultiPolygon")
+        assert "zone_name" in feat["properties"]
+        assert "n_cells" in feat["properties"]
+
+
+def test_zones_few_cells() -> None:
+    """When cells < max_zones, each cell is its own zone."""
+    mini = pd.DataFrame({
+        "h3": ["a", "b", "c"],
+        "month": ["2024-01"] * 3,
+        "n_listings": [10, 20, 30],
+    })
+    zones = build_zones(mini, max_zones=10)
+    assert len(zones) == 3
+    assert zones["zone"].nunique() == 3

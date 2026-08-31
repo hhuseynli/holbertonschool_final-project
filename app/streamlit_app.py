@@ -103,6 +103,7 @@ if "predictions" not in artifacts or "panel" not in artifacts:
 
 predictions: pd.DataFrame = artifacts["predictions"]
 panel: pd.DataFrame = artifacts["panel"]
+zone_df: pd.DataFrame | None = artifacts.get("zones")
 
 # ---------------------------------------------------------------------------
 # Sidebar controls
@@ -136,24 +137,36 @@ st.sidebar.markdown(
 
 st.title("Where is Baku appreciating — and why?")
 
-geojson, colormap = viz.hex_layer_geojson(
-    predictions, panel, scenario=scenario, horizon=int(horizon), metric=metric
-)
+# Use zone layer (merged polygons) when available, hex layer as fallback
+_use_zones = zone_df is not None and len(zone_df) > 0
+if _use_zones:
+    geojson, colormap = viz.zone_layer_geojson(
+        predictions, panel, zone_df,
+        scenario=scenario, horizon=int(horizon), metric=metric,
+    )
+    _tooltip_fields = ["label", "zone_name"]
+    _tooltip_aliases = [viz.METRIC_LABELS[metric], "zone"]
+    _layer_name = "zones"
+else:
+    geojson, colormap = viz.hex_layer_geojson(
+        predictions, panel, scenario=scenario, horizon=int(horizon), metric=metric,
+    )
+    _tooltip_fields = ["label", "h3"]
+    _tooltip_aliases = [viz.METRIC_LABELS[metric], "cell"]
+    _layer_name = "hexagons"
 layer_cells = {feat["id"] for feat in geojson["features"]}
 
-# OpenStreetMap tiles: Carto's free raster endpoint now watermarks
-# ("API key required"), OSM renders cleanly without one.
 fmap = folium.Map(
     location=list(config.CITY_CENTRE), zoom_start=11, tiles="OpenStreetMap"
 )
 
 folium.GeoJson(
     geojson,
-    name="hexagons",
+    name=_layer_name,
     style_function=lambda feat: {
         "fillColor": colormap(feat["properties"]["value"]),
         "color": "#546e7a",
-        "weight": 0.4,
+        "weight": 0.8 if _use_zones else 0.4,
         "fillOpacity": 0.65,
     },
     highlight_function=lambda feat: {
@@ -162,7 +175,7 @@ folium.GeoJson(
         "fillOpacity": 0.85,
     },
     tooltip=folium.GeoJsonTooltip(
-        fields=["label", "h3"], aliases=[viz.METRIC_LABELS[metric], "cell"]
+        fields=_tooltip_fields, aliases=_tooltip_aliases,
     ),
 ).add_to(fmap)
 
@@ -218,28 +231,25 @@ st.markdown(
 )
 
 
-def _selected_cell(state: dict | None, cells: set[str]) -> str | None:
-    """Resolve the clicked hexagon id from the st_folium return payload.
+def _selected_cell(state: dict | None, panel_cells: set[str]) -> str | None:
+    """Resolve a map click to an H3 cell id.
 
-    Prefers the clicked GeoJSON feature's id / ``properties.h3``; falls back
-    to converting the raw click coordinates into an H3 cell.
+    Works for both zone and hex layers: converts the raw click lat/lng
+    into an H3 cell and checks it exists in the panel.
     """
     if not state:
         return None
-    drawing = state.get("last_active_drawing") or {}
-    cell = drawing.get("id") or (drawing.get("properties") or {}).get("h3")
-    if cell in cells:
-        return cell
     clicked = state.get("last_object_clicked") or {}
     lat, lng = clicked.get("lat"), clicked.get("lng")
     if lat is not None and lng is not None:
         cell = h3.latlng_to_cell(float(lat), float(lng), config.H3_RESOLUTION)
-        if cell in cells:
+        if cell in panel_cells:
             return cell
     return None
 
 
-selected = _selected_cell(map_state, layer_cells)
+_panel_cells = set(panel["h3"].unique())
+selected = _selected_cell(map_state, _panel_cells)
 
 # ---------------------------------------------------------------------------
 # Selected-cell detail

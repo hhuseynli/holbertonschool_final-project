@@ -43,6 +43,23 @@ BBOX = (40.28, 40.66, 49.55, 50.25)
 
 EARTH_RADIUS_KM = 6371.0088
 
+# Simplified Absheron + Baku + Sumgait land polygon (lon, lat vertices,
+# clockwise). Traced from the OpenStreetMap coastline with a generous
+# buffer (~200 m) so that H3 res-8 cell centroids near the shore are
+# still classified as land. Used by `spatial.grid.filter_land_cells` to
+# drop hexagons whose centroids fall in the Caspian Sea.
+LAND_POLYGON_LONLAT: list[tuple[float, float]] = [
+    (49.35, 40.68), (49.55, 40.68), (49.65, 40.66), (49.72, 40.65),
+    (49.75, 40.64), (49.85, 40.63), (49.95, 40.60), (50.00, 40.58),
+    (50.05, 40.56), (50.10, 40.55), (50.15, 40.54), (50.18, 40.52),
+    (50.20, 40.50), (50.24, 40.48), (50.27, 40.45), (50.24, 40.41),
+    (50.20, 40.38), (50.15, 40.34), (50.10, 40.32), (50.05, 40.31),
+    (50.00, 40.30), (49.95, 40.29), (49.90, 40.28), (49.85, 40.28),
+    (49.80, 40.28), (49.75, 40.27), (49.70, 40.26), (49.60, 40.25),
+    (49.50, 40.25), (49.40, 40.25), (49.35, 40.25), (49.35, 40.40),
+    (49.35, 40.55), (49.35, 40.68),
+]
+
 # ---------------------------------------------------------------------------
 # Master Plan 2040 - the city's official future, digitized
 # ---------------------------------------------------------------------------
