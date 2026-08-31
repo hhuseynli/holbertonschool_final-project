@@ -41,6 +41,8 @@ BASE_CELL = h3.latlng_to_cell(40.40, 49.85, 8)
 STGCN_KW = dict(hidden=16, ks=3, seed=0)  # small net -> fast tests
 EPOCHS = 40
 
+requires_torch = pytest.mark.skipif(not stgcn.HAS_TORCH, reason="PyTorch not installed")
+
 
 def _normalized_adjacency(cells: list[str]) -> np.ndarray:
     """D^-1/2 (A+I) D^-1/2 over the H3 contiguity of `cells`.
@@ -100,6 +102,8 @@ def planted() -> SimpleNamespace:
 @pytest.fixture(scope="module")
 def fitted_stgcn(planted: SimpleNamespace) -> stgcn.STGCNForecaster:
     """One full-panel STGCN fit shared by the rollout / loss tests."""
+    if not stgcn.HAS_TORCH:
+        pytest.skip("PyTorch not installed")
     fc = stgcn.STGCNForecaster(planted.adj, planted.cells, planted.months, **STGCN_KW)
     return fc.fit(planted.values, planted.mask, epochs=EPOCHS)
 
@@ -196,6 +200,7 @@ def _walk_forward_mae(make_forecaster, planted: SimpleNamespace) -> tuple[float,
     )
 
 
+@requires_torch
 def test_stgcn_beats_persistence(planted: SimpleNamespace) -> None:
     def make(months):
         return stgcn.STGCNForecaster(planted.adj, planted.cells, months, **STGCN_KW)
@@ -225,11 +230,14 @@ def test_ridge_beats_persistence(planted: SimpleNamespace) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("which", ["stgcn", "ridge"])
+@pytest.mark.parametrize("which", [
+    pytest.param("stgcn", marks=requires_torch),
+    "ridge",
+])
 def test_forecast_rollout(
-    which: str, planted: SimpleNamespace, fitted_stgcn, fitted_ridge
+    which: str, planted: SimpleNamespace, fitted_ridge, request
 ) -> None:
-    fc = fitted_stgcn if which == "stgcn" else fitted_ridge
+    fc = request.getfixturevalue("fitted_stgcn") if which == "stgcn" else fitted_ridge
     out = fc.forecast()  # default config.FORECAST_HORIZONS == (12, 24)
 
     n = len(planted.cells)
@@ -255,6 +263,7 @@ def test_forecast_requires_fit(planted: SimpleNamespace) -> None:
 # ---------------------------------------------------------------------------
 
 
+@requires_torch
 def test_stgcn_training_loss_decreases(fitted_stgcn) -> None:
     hist = fitted_stgcn.history_
     assert len(hist) == EPOCHS
@@ -262,6 +271,7 @@ def test_stgcn_training_loss_decreases(fitted_stgcn) -> None:
     assert np.mean(hist[-5:]) < np.mean(hist[:5]), "training loss should decrease"
 
 
+@requires_torch
 def test_stgcn_deterministic(planted: SimpleNamespace, fitted_stgcn) -> None:
     """Same seed + data => identical forecasts."""
     again = stgcn.STGCNForecaster(
@@ -275,8 +285,8 @@ def test_stgcn_deterministic(planted: SimpleNamespace, fitted_stgcn) -> None:
 # ---------------------------------------------------------------------------
 
 
+@requires_torch
 def test_make_forecaster_prefers_stgcn(planted: SimpleNamespace) -> None:
-    assert stgcn.HAS_TORCH, "torch is installed in the test environment"
     fc = stgcn.make_forecaster(planted.adj, planted.cells, planted.months)
     assert isinstance(fc, stgcn.STGCNForecaster)
     ridge = stgcn.make_forecaster(
