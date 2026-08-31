@@ -33,6 +33,7 @@ make app           # interactive Streamlit + Folium map
 make test          # full test suite
 make full          # full-size dataset + STGCN forecaster
 make maup          # compare units of analysis (H3 vs KD-tree vs market regions)
+make harvest       # fetch real bina.az listings (polite, cached, robots-obeying)
 ```
 
 `make demo` runs every stage — data → dedup → tessellation → cell panel → features →
@@ -66,6 +67,94 @@ duplicates — with every planted parameter recorded in
 `artifacts/synthetic_truth.json`. The test suite asserts the pipeline
 *recovers* what was planted (the DiD estimate, the duplicate map), not merely
 that it runs.
+
+## Real data: bina.az, and counting every flat once
+
+The pipeline runs on either of two feeds. `make harvest` fetches **real
+sale listings from bina.az**; the synthetic generator remains the offline
+default so CI and a fresh clone work without a network.
+
+```bash
+make harvest                                   # ~500 real adverts
+python scripts/harvest_real.py --limit 2000 --images --geocode
+```
+
+**How the real site actually works.** bina.az is a Next.js + Apollo app: the
+listing grid is fetched client-side and its CSS classes are build-hashed
+(`sc-eb5192be-3 dJBjvE`), so selector-based scraping is worthless. Two
+*machine-intended* payloads are stable and are what `bakuml/data/sources/bina.py`
+reads — the `schema.org/Product` JSON-LD block (price, rooms, floor area,
+address, images) and the inline Apollo `Item` object (floor/floors,
+`updatedAt`, description, owner-vs-broker, new/old build). Item URLs come
+from the sitemap that bina.az's own `robots.txt` advertises for crawlers, so
+no Cloudflare bypass is involved.
+
+**Politeness is enforced, not promised**: one request at a time with a delay,
+a `User-Agent` that names the project instead of posing as a browser, a disk
+cache so re-runs cost the site nothing, and `robots.txt` parsed and obeyed
+(item pages allowed; `/bookmarks` and `/items/new` denied — asserted in
+tests).
+
+**Every flat is counted once.** Duplicates are the norm: brokers re-post the
+same flat, and the same flat appears on several platforms.
+`bakuml/data/sources/combine.py` unions the sources and reports the
+reduction, separating *within-platform re-posts* from *the same flat on two
+platforms*:
+
+```
+  bina.az                513 adverts        <- measured, 2026-08 harvest
+  TOTAL adverts          513
+  unique flats           511
+  duplicates removed       2  (0.4%)
+      within-source pairs: 2
+      cross-source pairs:  0
+```
+
+One of those two is a textbook re-post: items `6137287` and `6381947` carry a
+byte-identical description, the same 184,000 AZN and the same floor 10/15 —
+one flat, two adverts, and the broker simply typed the area differently
+(68 vs 65 m²). The detector also *declined* to merge two Yasamal flats
+sharing a price and an area but differing in floor and photos.
+
+Note what 0.4 % does and does not mean: it is a **sample-density artifact**,
+not the market's duplicate rate. 700 sitemap URLs are ~0.5 % of bina.az's
+~150 k items, so the chance that *both* copies of a re-posted pair fall in
+the sample is on the order of 0.5 %² — the pairs found are the lucky ones.
+Measuring the real rate needs either a dense slice (one district, exhaustively)
+or a much larger sample; `--limit` and the page cache are there for that.
+
+Photographs carry the detection (`sources/images.py`, cached perceptual
+hashes): reworded text cannot distinguish a re-post from two similar flats
+in one building, but reused photos can.
+
+### The coordinate problem, stated plainly
+
+**bina.az publishes no per-listing coordinates.** The only points on an item
+page belong to the *district* (14 Baku rayons) and to the listing agency's
+office. Every row therefore carries `geo_precision`, and a test asserts the
+rayon centroid is never mistaken for a measured point.
+
+Since the whole spatial layer would be meaningless with every listing in a
+rayon collapsed onto one coordinate, `sources/geocode.py` resolves street
+addresses through **OSM Nominatim** — at one request per second, cached,
+capped per run, as its usage policy requires. Measured against the live
+feed, a bina.az address *with* its house number usually misses while the
+bare street name hits, so the geocoder runs a cascade (full address →
+street → named micro-location) and records which precision each row got.
+The match rate is reported, never assumed.
+
+### Platforms that refused
+
+`tap.az` and `emlak.az` return **HTTP 403 from Cloudflare's WAF for every
+user agent** — and so does their `robots.txt`, so there is no permission
+signal to work from at all. That is an IP-reputation block on datacentre
+traffic, not a JS challenge, so the project's UA-rotation-and-backoff
+middleware cannot address it (verified across four user agents). We did not
+escalate to browser-fingerprint spoofing or residential proxies: that would
+be circumventing a deliberate access control rather than crawling permitted
+content. `arenda.az` serves a JS-only shell. The cross-platform dedup path
+is implemented and tested, ready for a second source, but is not currently
+exercised on live data.
 
 ## The novel part: the city's official future, digitized as features
 

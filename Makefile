@@ -1,4 +1,4 @@
-.PHONY: install demo full test app dataset maup clean
+.PHONY: install demo full test app dataset maup harvest clean
 
 install:
 	pip install -r requirements.txt
@@ -19,6 +19,10 @@ dataset:
 # under the project's leakage-proof validation protocols.
 maup:
 	python scripts/maup_study.py
+
+# Fetch real listings from bina.az (polite: 1 req/s, cached, robots-obeying)
+harvest:
+	python scripts/harvest_real.py --limit 500
 
 test:
 	python -m pytest tests/ -q

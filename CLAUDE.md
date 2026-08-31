@@ -15,6 +15,7 @@ make demo          # fast end-to-end pipeline (~2-4 min), writes artifacts/
 make full          # full pipeline with STGCN forecaster
 make app           # streamlit run app/streamlit_app.py
 make maup          # compare units of analysis under leakage-proof protocols
+make harvest       # fetch real bina.az listings
 
 # Run a single test file
 python -m pytest tests/test_did.py -q
@@ -33,7 +34,7 @@ python scripts/make_dataset.py
 
 The pipeline flows through 10 stages orchestrated by `bakuml/pipeline.py`:
 
-**Data layer** (`bakuml/data/`): Synthetic listings generator (`synthetic.py`) produces the offline dataset. Scrapy project (`scraping/`) handles bina.az with Cloudflare-retry and proxy-rotation middlewares. Dedup (`dedup.py`) removes broker re-posts via pHash hamming distance + TF-IDF cosine similarity with spatial blocking.
+**Data layer** (`bakuml/data/`): Two feeds. `sources/` harvests **real** listings from bina.az (sitemap -> item pages -> JSON-LD + inline Apollo payload; polite, cached, robots-enforced) and can geocode addresses via Nominatim; `synthetic.py` produces the offline dataset used by CI and by default. Scrapy project (`scraping/`) handles bina.az with Cloudflare-retry and proxy-rotation middlewares. Dedup (`dedup.py`) removes broker re-posts via pHash hamming distance + TF-IDF cosine similarity with spatial blocking.
 
 **Spatial backbone** (`bakuml/spatial/`): `tessellation.py` defines the unit of analysis behind a five-method protocol (assign / centroid / neighbours / boundary / block) with three implementations - H3 hexagons, an adaptive KD-tree of equal-count cells (the default), and contiguity-constrained market regions. `grid.py` assigns listings to cells and builds the `(h3, month)` panel; `lags.py` computes spatial lag features (leakage-safe: only months <= t-1); `graph.py` builds the normalized adjacency matrix for the GNN; `zones.py` groups cells into organic market micro-zones for the map. All of them delegate geometry and contiguity to the active tessellation, so none is H3-specific.
 
@@ -59,6 +60,25 @@ So the geometry is pluggable and the default is empirical. `scripts/maup_study.p
 - The panel key column is still named `h3` (schema stability), but it holds whatever id the active tessellation produces: an H3 index, a KD path (`kd:0110`), or a region id (`mr:0042`). Treat it as opaque.
 - Only `MarketRegionTessellation` uses prices, so it must be fitted with `price_cutoff_month` (the pipeline passes `_TESS_HOLDOUT_MONTHS` before the end). Coordinate-only tessellations carry no target information.
 - The observed grid is disconnected (Sumgait, Alat, the Absheron villages). Any clustering with a connectivity constraint must run per connected component; handing sklearn a disconnected matrix makes it silently bridge islands.
+
+## Real data
+
+- bina.az publishes **no per-listing coordinates**: item pages carry only
+  district (rayon) centroids and the agency's office. Every real row records
+  `geo_precision` (`district_centroid` or `street`); never treat a centroid
+  as a measured point.
+- Scraping etiquette is part of the contract, not a nicety: one request at a
+  time with a delay, a `User-Agent` naming the project, a disk cache, and
+  `robots.txt` obeyed. `RobotFileParser.read()` ignores this environment's
+  proxy and fails closed, so robots.txt is fetched with `requests`.
+- Nominatim allows at most 1 request/second and asks bulk users to self-host;
+  `geocode.py` caps lookups per run and caches every result, misses included.
+- tap.az and emlak.az block this environment at the WAF (403 for every UA,
+  robots.txt included). Do not attempt fingerprint spoofing or proxy
+  rotation to get around it.
+- Duplicates must be counted once. `sources/combine.py` is the entry point
+  and its report distinguishes within-platform re-posts from cross-platform
+  ones.
 
 ## Critical invariants
 
