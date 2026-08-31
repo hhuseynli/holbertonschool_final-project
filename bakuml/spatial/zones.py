@@ -1,20 +1,28 @@
-"""Market micro-zones: density-aware clustering of H3 cells.
+"""Market micro-zones: density-aware clustering of panel cells.
 
-The analytical backbone stays on H3 hexagons (uniform area, clean spatial
-lags, hierarchical CV blocks). This module adds a *presentation layer* that
-groups hexagons into visually meaningful market micro-zones using
-agglomerative clustering with spatial connectivity constraints.
+This is a *presentation layer*: whatever cells the analytical backbone uses
+(H3 hexagons by default, or an adaptive KD-tree / market regions - see
+:mod:`bakuml.spatial.tessellation`), this module groups them into visually
+meaningful market micro-zones using agglomerative clustering with spatial
+connectivity constraints. The panel, features and models are unaffected.
 
 Clusters are formed using cell centroids + normalised listing density so that
 high-activity urban cores get finer zones while sparse periphery cells are
 grouped into larger zones. The resulting zone polygons (shapely
-``unary_union`` of constituent hex polygons) give the app an organic,
+``unary_union`` of constituent cell polygons) give the app an organic,
 non-hexagonal map appearance.
+
+Geometry and contiguity come from the active tessellation rather than from
+h3 directly, so zones work for every unit of analysis. Clustering runs
+separately per connected component of the contiguity graph: the observed
+grid is not one blob (Sumgait, Alat and the Absheron villages are islands),
+and handing sklearn a disconnected connectivity matrix makes it silently
+"complete" the graph, which merges geographically separate places into a
+single "zone".
 """
 
 from __future__ import annotations
 
-import h3
 import numpy as np
 import pandas as pd
 from shapely.geometry import Polygon as ShapelyPolygon
@@ -23,13 +31,48 @@ from sklearn.cluster import AgglomerativeClustering
 from sklearn.preprocessing import StandardScaler
 
 from bakuml import config
+from bakuml.spatial import tessellation as tess_mod
+from bakuml.spatial.tessellation import Tessellation
 
 
-def _hex_polygon(cell: str) -> ShapelyPolygon:
-    """Shapely polygon for one H3 cell (lon/lat order)."""
-    ring = [(lng, lat) for lat, lng in h3.cell_to_boundary(cell)]
+def _cell_polygon(cell: str, tess: Tessellation) -> ShapelyPolygon:
+    """Shapely polygon for one cell (lon/lat order)."""
+    ring = [(lng, lat) for lat, lng in tess.boundary(cell)]
     ring.append(ring[0])
     return ShapelyPolygon(ring)
+
+
+def _stored_polygons(geometry: dict) -> dict[str, ShapelyPolygon]:
+    """Cell id -> polygon, from a stored per-cell FeatureCollection."""
+    out: dict[str, ShapelyPolygon] = {}
+    for feat in geometry.get("features", []):
+        cell = feat.get("id") or (feat.get("properties") or {}).get("h3")
+        geom = feat.get("geometry") or {}
+        if cell is None or geom.get("type") != "Polygon":
+            continue
+        ring = [(x, y) for x, y in geom["coordinates"][0]]
+        if len(ring) >= 4:
+            out[cell] = ShapelyPolygon(ring)
+    return out
+
+
+def _components(cells: list[str], tess: Tessellation) -> list[list[str]]:
+    """Connected components of the cell contiguity graph, largest first."""
+    remaining = set(cells)
+    out: list[list[str]] = []
+    while remaining:
+        seed = min(remaining)
+        remaining.discard(seed)
+        comp, stack = [seed], [seed]
+        while stack:
+            node = stack.pop()
+            for nb in tess.neighbours(node, 1):
+                if nb in remaining:
+                    remaining.discard(nb)
+                    comp.append(nb)
+                    stack.append(nb)
+        out.append(sorted(comp))
+    return sorted(out, key=len, reverse=True)
 
 
 def build_zones(
@@ -37,6 +80,7 @@ def build_zones(
     *,
     max_zones: int = 40,
     density_weight: float = 0.5,
+    tess: Tessellation | None = None,
 ) -> pd.DataFrame:
     """Cluster panel cells into market micro-zones.
 
@@ -57,6 +101,7 @@ def build_zones(
     ``zone`` is an int label, ``zone_name`` is a human-readable string
     (``"Zone 1"`` .. ``"Zone N"``).
     """
+    tess = tess_mod.resolve(tess)
     cells = sorted(panel["h3"].unique())
     n = len(cells)
     if n <= max_zones:
@@ -68,7 +113,7 @@ def build_zones(
         })
 
     # --- features: centroid lat/lon + log listing density ---
-    centroids = np.array([h3.cell_to_latlng(c) for c in cells])  # (n, 2)
+    centroids = np.array([tess.centroid(c) for c in cells])  # (n, 2)
     density = (
         panel.groupby("h3")["n_listings"]
         .sum()
@@ -81,23 +126,38 @@ def build_zones(
     features = np.hstack([centroids, log_density * density_weight])
     features = StandardScaler().fit_transform(features)
 
-    # --- spatial connectivity from H3 neighbours ---
+    # --- cluster within each connected component ---
+    # A zone must be one place. Clustering the whole set against a
+    # disconnected connectivity matrix lets sklearn bridge the gaps, so
+    # each component gets its own run and its own share of the zone budget.
     cell_idx = {c: i for i, c in enumerate(cells)}
-    connectivity = np.zeros((n, n), dtype=bool)
-    for c in cells:
-        i = cell_idx[c]
-        for nb in h3.grid_disk(c, 1):
-            j = cell_idx.get(nb)
-            if j is not None and j != i:
-                connectivity[i, j] = True
-                connectivity[j, i] = True
+    comps = _components(cells, tess)
+    budget = _allocate(comps, max_zones)
 
-    model = AgglomerativeClustering(
-        n_clusters=max_zones,
-        connectivity=connectivity,
-        linkage="ward",
-    )
-    labels = model.fit_predict(features)
+    labels = np.empty(n, dtype=int)
+    next_label = 0
+    for comp in comps:
+        idx = np.array([cell_idx[c] for c in comp], dtype=int)
+        k = budget[id(comp)]
+        if k >= len(comp):
+            labels[idx] = np.arange(next_label, next_label + len(comp))
+            next_label += len(comp)
+            continue
+        sub_idx = {c: i for i, c in enumerate(comp)}
+        m = len(comp)
+        connectivity = np.zeros((m, m), dtype=bool)
+        for c in comp:
+            i = sub_idx[c]
+            for nb in tess.neighbours(c, 1):
+                j = sub_idx.get(nb)
+                if j is not None and j != i:
+                    connectivity[i, j] = True
+                    connectivity[j, i] = True
+        model = AgglomerativeClustering(
+            n_clusters=k, connectivity=connectivity, linkage="ward",
+        )
+        labels[idx] = model.fit_predict(features[idx]) + next_label
+        next_label += k
 
     return pd.DataFrame({
         "h3": cells,
@@ -106,13 +166,37 @@ def build_zones(
     })
 
 
+def _allocate(components: list[list[str]], total: int) -> dict[int, int]:
+    """Share `total` zones across components by size (>= 1 each).
+
+    Largest-remainder apportionment, capped so no component is asked for
+    more zones than it has cells.
+    """
+    n_cells = sum(len(c) for c in components)
+    total = max(total, len(components))
+    exact = {
+        id(c): 1 + (total - len(components)) * len(c) / n_cells for c in components
+    }
+    floors = {k: int(np.floor(v)) for k, v in exact.items()}
+    short = total - sum(floors.values())
+    order = sorted(components, key=lambda c: -(exact[id(c)] - floors[id(c)]))
+    for c in order[:max(0, short)]:
+        floors[id(c)] += 1
+    for c in components:
+        floors[id(c)] = min(floors[id(c)], len(c))
+    return floors
+
+
 def zones_to_geojson(
     zone_df: pd.DataFrame,
     zone_values: dict[int, dict] | None = None,
+    *,
+    tess: Tessellation | None = None,
+    geometry: dict | None = None,
 ) -> dict:
     """GeoJSON FeatureCollection of merged zone polygons.
 
-    Each zone's geometry is the ``unary_union`` of its constituent H3 hex
+    Each zone's geometry is the ``unary_union`` of its constituent cell
     polygons, producing organic (non-hexagonal) shapes.
 
     Parameters
@@ -122,11 +206,24 @@ def zones_to_geojson(
     zone_values : dict, optional
         ``{zone_int: {prop_name: value, ...}}`` merged into each feature's
         properties (for choropleth colouring / tooltips).
+    geometry : dict, optional
+        A per-cell GeoJSON FeatureCollection (the run's ``cell_geometry``
+        artifact). When given, cell polygons are read from it instead of
+        from a tessellation - which is what lets the app draw a run whose
+        (fitted) tessellation it cannot reconstruct.
     """
+    stored = _stored_polygons(geometry) if geometry is not None else None
+    if stored is None:
+        tess = tess_mod.resolve(tess)
     features = []
     for zone_id, grp in zone_df.groupby("zone"):
-        hexes = [_hex_polygon(c) for c in grp["h3"]]
-        merged = unary_union(hexes)
+        if stored is not None:
+            polys = [stored[c] for c in grp["h3"] if c in stored]
+            if not polys:
+                continue
+        else:
+            polys = [_cell_polygon(c, tess) for c in grp["h3"]]
+        merged = unary_union(polys)
         # unary_union may produce MultiPolygon for disconnected zones
         if merged.geom_type == "Polygon":
             coords = [list(merged.exterior.coords)]

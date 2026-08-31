@@ -143,6 +143,9 @@ if _use_zones:
     geojson, colormap = viz.zone_layer_geojson(
         predictions, panel, zone_df,
         scenario=scenario, horizon=int(horizon), metric=metric,
+        # Cell polygons come from the run's artifact: the app cannot
+        # reconstruct a fitted tessellation's geometry.
+        geometry=artifacts.get("cell_geometry"),
     )
     _tooltip_fields = ["label", "zone_name"]
     _tooltip_aliases = [viz.METRIC_LABELS[metric], "zone"]
@@ -150,10 +153,11 @@ if _use_zones:
 else:
     geojson, colormap = viz.hex_layer_geojson(
         predictions, panel, scenario=scenario, horizon=int(horizon), metric=metric,
+        geometry=artifacts.get("cell_geometry"),
     )
     _tooltip_fields = ["label", "h3"]
     _tooltip_aliases = [viz.METRIC_LABELS[metric], "cell"]
-    _layer_name = "hexagons"
+    _layer_name = "cells"
 layer_cells = {feat["id"] for feat in geojson["features"]}
 
 fmap = folium.Map(

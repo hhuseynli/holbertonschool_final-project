@@ -1,15 +1,26 @@
-"""H3 spatial backbone: from point listings to a (cell, month) panel.
+"""Spatial backbone: from point listings to a (cell, month) panel.
 
 Methodology
 -----------
-The study discretises Baku & Absheron into Uber H3 hexagons at resolution 8
-(~0.73 km^2 per cell, `config.H3_RESOLUTION`). Hexagons are preferred over
-administrative districts because (a) they have near-uniform area, so cell
-medians are comparable across the city, (b) each cell has exactly six
-equidistant neighbours (pentagons never occur in our bounding box at res 8),
-which gives clean spatial-lag and graph-convolution operators, and (c) the
-hierarchy (`cell_to_parent`) yields contiguous blocks for spatial
-cross-validation.
+The study discretises Baku & Absheron into cells and aggregates listings
+within them. Uber H3 hexagons are the documented baseline: near-uniform
+area, six equidistant neighbours, and a parent hierarchy that yields
+contiguous blocks for spatial cross-validation - all of which beat
+administrative rayons, whose polygons blend elite blocks with industrial
+outskirts (the Modifiable Areal Unit Problem, MAUP).
+
+Hexagons nonetheless impose a *uniform* grid on a radically non-uniform
+city, which on this panel discards a large share of the data to the
+thinness filter below. So the geometry is not hard-coded here: every
+function delegates to a `bakuml.spatial.tessellation.Tessellation` (H3, an
+adaptive KD-tree of equal-count cells, or contiguity-constrained market
+regions), defaulting to the module-level active one. Pass `tess=` to
+override per call; `scripts/maup_study.py` compares the options under the
+project's leakage-proof protocols.
+
+The `h3` column keeps its name for schema stability: it holds whatever cell
+id the active tessellation produces (an H3 index, a KD path like
+`kd:0110`, or a region id like `mr:0042`).
 
 Listings are aggregated to one row per (cell, month) with the median and
 mean of `price_azn_m2`, the listing count, and the share of new-construction
@@ -20,49 +31,69 @@ re-inflated to the full cells x months rectangle by `complete_panel`, with
 explicit `n_listings = 0` and NaN prices so downstream code can mask
 unobserved cell-months instead of silently treating them as zeros.
 
-All functions use the h3 v4 API exclusively.
+Where this module does touch h3 directly it uses the v4 API exclusively.
 """
 
 from __future__ import annotations
 
-import h3
 import pandas as pd
 from shapely.geometry import Point, Polygon
 
 from bakuml import config
 from bakuml.data.schema import PANEL_BASE_COLUMNS, validate_panel
+from bakuml.spatial import tessellation as tess_mod
+from bakuml.spatial.tessellation import Tessellation
 
 # Built once at import time from config; used by filter_land_cells.
 _LAND_POLY = Polygon(config.LAND_POLYGON_LONLAT)
 
 
-def assign_cells(listings: pd.DataFrame, res: int = config.H3_RESOLUTION) -> pd.DataFrame:
+def assign_cells(
+    listings: pd.DataFrame,
+    res: int | None = None,
+    *,
+    tess: Tessellation | None = None,
+) -> pd.DataFrame:
     """Return a copy of `listings` with an added `h3` cell-id column.
 
-    Cells are computed from the `lat` / `lon` columns at resolution `res`.
+    Cells come from `tess` (default: the active tessellation). `res` is a
+    convenience shortcut selecting an H3 grid at that resolution, kept
+    because the documented baseline is resolution-parameterised.
     The input frame is never mutated.
     """
+    if res is not None and tess is not None:
+        raise ValueError("pass either res= or tess=, not both")
+    if res is not None:
+        tess = tess_mod.H3Tessellation(res, min(res, config.H3_BLOCK_RESOLUTION))
+    tess = tess_mod.resolve(tess)
     out = listings.copy()
-    out["h3"] = [
-        h3.latlng_to_cell(la, lo, res)
-        for la, lo in zip(out["lat"].to_numpy(), out["lon"].to_numpy())
-    ]
+    out["h3"] = tess.assign(out["lat"].to_numpy(), out["lon"].to_numpy())
     return out
 
 
-def filter_land_cells(listings: pd.DataFrame) -> pd.DataFrame:
-    """Drop listings whose H3 cell centroid falls in the Caspian Sea.
+def filter_land_cells(
+    listings: pd.DataFrame, *, tess: Tessellation | None = None
+) -> pd.DataFrame:
+    """Drop listings whose cell centroid falls in the Caspian Sea.
 
     Requires an ``h3`` column (call :func:`assign_cells` first). Checks each
-    unique cell's centroid against the simplified Absheron land polygon
-    (:data:`config.LAND_POLYGON_LONLAT`). Returns the subset of rows whose
-    cell is on land.
+    unique cell's centroid - via the active tessellation, so this works for
+    hexagons, KD-tree rectangles and market regions alike - against the
+    simplified Absheron land polygon (:data:`config.LAND_POLYGON_LONLAT`).
+    Returns the subset of rows whose cell is on land.
+
+    Note that an adaptive tessellation is already largely self-limiting
+    here: its cells are drawn from where listings actually are, so it
+    generates few sea cells to begin with. The filter still matters for the
+    map, where a cell's *polygon* can reach offshore.
     """
+    tess = tess_mod.resolve(tess)
     cells = listings["h3"].unique()
-    land_cells = {
-        c for c in cells
-        if _LAND_POLY.contains(Point(h3.cell_to_latlng(c)[1], h3.cell_to_latlng(c)[0]))
-    }
+    land_cells = set()
+    for c in cells:
+        lat, lon = tess.centroid(c)
+        if _LAND_POLY.contains(Point(lon, lat)):
+            land_cells.add(c)
     return listings[listings["h3"].isin(land_cells)].reset_index(drop=True)
 
 
@@ -132,9 +163,12 @@ def complete_panel(panel: pd.DataFrame, months: list[str]) -> pd.DataFrame:
     return out[ordered]
 
 
-def cell_centroids(cells: list[str]) -> pd.DataFrame:
+def cell_centroids(
+    cells: list[str], *, tess: Tessellation | None = None
+) -> pd.DataFrame:
     """DataFrame [h3, lat, lon] with the centroid of each cell."""
-    latlng = [h3.cell_to_latlng(c) for c in cells]
+    tess = tess_mod.resolve(tess)
+    latlng = [tess.centroid(c) for c in cells]
     return pd.DataFrame(
         {
             "h3": list(cells),
@@ -147,21 +181,24 @@ def cell_centroids(cells: list[str]) -> pd.DataFrame:
 def cells_to_geojson(
     cells: list[str],
     properties: dict[str, dict] | None = None,
+    *,
+    tess: Tessellation | None = None,
 ) -> dict:
     """GeoJSON FeatureCollection of the cells' hexagon polygons.
 
     GeoJSON (RFC 7946) mandates `[lon, lat]` coordinate order and a closed
-    linear ring (first vertex repeated last). `h3.cell_to_boundary` returns
+    linear ring (first vertex repeated last). `Tessellation.boundary` returns
     `(lat, lng)` tuples, so each vertex is swapped here — getting this wrong
-    draws hexagons in the Gulf of Guinea instead of the Caspian.
+    draws the cells in the Gulf of Guinea instead of the Caspian.
 
     Each feature carries `id = <cell>` (used by folium/plotly choropleth
     joins) and `properties["h3"] = <cell>`; per-cell entries from
     `properties` (a `{cell: {name: value}}` mapping) are merged in.
     """
+    tess = tess_mod.resolve(tess)
     features = []
     for cell in cells:
-        ring = [[lng, lat] for lat, lng in h3.cell_to_boundary(cell)]
+        ring = [[lng, lat] for lat, lng in tess.boundary(cell)]
         ring.append(list(ring[0]))  # close the ring
         props = {"h3": cell}
         if properties and cell in properties:
