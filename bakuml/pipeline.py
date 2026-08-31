@@ -68,10 +68,6 @@ from bakuml.validation.spatial_cv import spatial_block_folds
 
 # Width of the 1-month conformal interval is scaled by sqrt(horizon) for
 # multi-month forecasts - a documented random-walk heuristic.
-#: Months withheld from price-driven tessellation fitting (>= the conformal
-#: calibration + holdout windows), so the geography stays leakage-free.
-_TESS_HOLDOUT_MONTHS = 9
-
 _Z_80 = norm.ppf(0.90)  # q10..q90 spans +/- 1.2816 sigma under normality
 
 
@@ -186,6 +182,25 @@ def _scenario_adjustment_log(
 
 def run_pipeline(
     scenarios: tuple[str, ...] = ("baseline", "polycentric", "transit"),
+    **kwargs,
+) -> dict:
+    """Run the pipeline, always restoring the process-wide tessellation.
+
+    ``_run_pipeline`` installs a module-level active tessellation so that
+    every downstream module picks it up without threading an argument. That
+    global must be restored even when a stage raises, or the next caller in
+    the same process (the next test, a notebook cell) silently resolves
+    cells against a tessellation from a failed run.
+    """
+    previous = tess_mod.get_active()
+    try:
+        return _run_pipeline(scenarios, **kwargs)
+    finally:
+        tess_mod.set_active(previous)
+
+
+def _run_pipeline(
+    scenarios: tuple[str, ...] = ("baseline", "polycentric", "transit"),
     *,
     fast: bool = False,
     prefer_forecaster: str = "stgcn",
@@ -222,17 +237,26 @@ def run_pipeline(
 
     # --------------------------------------------- 3. unit of analysis + panel
     spec = config.TESSELLATION if tessellation is None else tessellation
-    tess = tess_mod.build(spec) if isinstance(spec, str) else spec
+    if isinstance(spec, str):
+        tess = tess_mod.build(spec, **config.TESSELLATION_KWARGS.get(spec, {}))
+    else:
+        tess = spec
     # Price-driven tessellations must not see the evaluation window, so they
-    # are cut off well before its start; coordinate-only ones ignore this.
+    # are cut off well before it; coordinate-only ones ignore the cutoff.
+    hold = config.TESS_PRICE_HOLDOUT_MONTHS
     all_months = sorted(clean["listed_month"].unique())
-    cutoff = (
-        all_months[-_TESS_HOLDOUT_MONTHS]
-        if len(all_months) > _TESS_HOLDOUT_MONTHS else None
-    )
+    if len(all_months) <= hold:
+        # Silently fitting on every month would leak prices the model is
+        # later scored on - refuse instead.
+        raise ValueError(
+            f"panel has {len(all_months)} months, need > "
+            f"{hold} (config.TESS_PRICE_HOLDOUT_MONTHS) to fit a "
+            "tessellation without touching the evaluation window"
+        )
+    cutoff = all_months[-hold]
     tess.fit(clean, price_cutoff_month=cutoff)
-    previous_tess = tess_mod.set_active(tess)
-    _log(f"tessellation: {tess.describe()}", verbose)
+    tess_mod.set_active(tess)
+    _log(f"tessellation: {tess.describe()} (price cutoff {cutoff})", verbose)
 
     clean = assign_cells(clean)
     clean = filter_land_cells(clean)
@@ -274,7 +298,8 @@ def run_pipeline(
     # reported on the holdout months only - measuring it on the calibration
     # months would be an arithmetic identity (CQR widens the band until
     # ~(1-alpha) of calibration points fit), not a validation.
-    n_cal, n_holdout = 6, 3
+    n_cal = config.CONFORMAL_CAL_MONTHS
+    n_holdout = config.CONFORMAL_HOLDOUT_MONTHS
     train_months = months[: -(n_cal + n_holdout)]
     cal_months = months[-(n_cal + n_holdout): -n_holdout]
     holdout_months = months[-n_holdout:]
@@ -440,5 +465,4 @@ def run_pipeline(
     )
 
     _log(f"done in {metrics['runtime_seconds']}s -> {outdir}", verbose)
-    tess_mod.set_active(previous_tess)
     return metrics

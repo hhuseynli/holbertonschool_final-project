@@ -43,7 +43,11 @@ from bakuml.data.synthetic import generate_listings
 from bakuml.features.build import FEATURE_COLS, build_feature_matrix
 from bakuml.models.baseline import evaluate_spatial_cv, evaluate_walk_forward
 from bakuml.spatial import tessellation as tess_mod
-from bakuml.spatial.grid import assign_cells, build_cell_month_panel
+from bakuml.spatial.grid import (
+    assign_cells,
+    build_cell_month_panel,
+    filter_land_cells,
+)
 
 # Candidates: the spec baseline at three resolutions (a resolution
 # sensitivity analysis is itself a MAUP diagnostic), plus the two
@@ -64,26 +68,49 @@ def candidates() -> dict:
 
 
 def within_cell_variance_share(listings: pd.DataFrame) -> float:
-    """Mean within-cell log-price variance as a share of the total.
+    """Within-cell share of total log-price variance (proper decomposition).
 
     The core MAUP question: do the cells carve the market at its joints?
     Cells that mix an elite block with an industrial strip have high
     internal variance, so their median describes nothing real.
+
+    This must be a *variance decomposition*, not a mean of per-cell
+    variances: candidates differ systematically in cell size, so an
+    unweighted mean would measure the cell-size mix as much as the
+    geography, and would silently drop every single-listing cell (whose
+    sample variance is undefined) while letting a 2-listing cell count as
+    much as a 200-listing one. Both numerator and denominator use the same
+    estimator, so the ratio is comparable across candidates.
+
+        within_share = sum_i (n_i - 1) * var_i / ((N - 1) * total_var)
     """
     logp = np.log(listings["price_azn_m2"].to_numpy(dtype=float))
     d = pd.DataFrame({"h3": listings["h3"].to_numpy(), "logp": logp})
-    total = float(np.var(logp))
-    within = float(d.groupby("h3")["logp"].var().mean())
-    return within / total if total > 0 else float("nan")
+    n_total = len(d)
+    total_var = float(d["logp"].var(ddof=1))
+    if n_total < 2 or not np.isfinite(total_var) or total_var <= 0:
+        return float("nan")
+    grp = d.groupby("h3")["logp"]
+    counts = grp.size().to_numpy(dtype=float)
+    variances = grp.var(ddof=1).to_numpy(dtype=float)
+    ok = counts >= 2  # single-listing cells contribute 0 dof, not NaN
+    ss_within = float(((counts[ok] - 1.0) * variances[ok]).sum())
+    return ss_within / ((n_total - 1.0) * total_var)
 
 
 def evaluate(name: str, tess, clean: pd.DataFrame, *, seed: int, cutoff: str) -> dict:
     """Score one tessellation end to end."""
     tess.fit(clean, price_cutoff_month=cutoff)
     assigned = assign_cells(clean, tess=tess)
+    # Mirror run_pipeline exactly: it drops cells centred at sea before
+    # building the panel, so a study that skipped this would be choosing a
+    # default by scoring a pipeline nobody runs.
+    assigned = filter_land_cells(assigned, tess=tess)
     panel = build_cell_month_panel(assigned)
 
-    retained = panel["n_listings"].sum() / len(assigned) * 100.0
+    # Retention is measured against the pre-filter listing count, so the
+    # sea filter's cost is visible rather than hidden in the denominator.
+    retained = panel["n_listings"].sum() / len(clean) * 100.0
     months_per_cell = panel.groupby("h3")["month"].nunique()
 
     row = {
@@ -144,9 +171,10 @@ def main() -> None:
     listings, _ = generate_listings(truth=truth)
     clean, _ = dedupe(listings)
 
-    # Price-driven tessellations see only pre-cutoff months (leakage-free).
+    # Price-driven tessellations see only pre-cutoff months.
     all_months = sorted(clean["listed_month"].unique())
-    cutoff = all_months[-9] if len(all_months) > 9 else None
+    hold = config.TESS_PRICE_HOLDOUT_MONTHS
+    cutoff = all_months[-hold] if len(all_months) > hold else None
 
     cands = candidates()
     if args.only:
@@ -209,6 +237,15 @@ def main() -> None:
         starved = ok[~ok.index.isin(viable.index)]["tessellation"].tolist()
         if starved:
             print(f"Excluded as unviable: {', '.join(starved)}")
+
+        if any(t.startswith("market") for t in ok["tessellation"]):
+            print(
+                "\nCaveat on market_*: the price cutoff makes the geography "
+                "leakage-free in TIME, but regions are still drawn using the "
+                "pre-cutoff prices of every cell, including cells that "
+                "spatial CV later holds out. Its scv_skill is therefore not "
+                "directly comparable with the coordinate-only candidates."
+            )
 
         # Stability across a tessellation's own tuning knob matters as much
         # as any single score: a family whose skill flips sign with an

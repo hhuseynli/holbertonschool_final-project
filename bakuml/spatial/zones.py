@@ -32,7 +32,7 @@ from sklearn.preprocessing import StandardScaler
 
 from bakuml import config
 from bakuml.spatial import tessellation as tess_mod
-from bakuml.spatial.tessellation import Tessellation
+from bakuml.spatial.tessellation import Tessellation, apportion, connected_components
 
 
 def _cell_polygon(cell: str, tess: Tessellation) -> ShapelyPolygon:
@@ -56,25 +56,6 @@ def _stored_polygons(geometry: dict) -> dict[str, ShapelyPolygon]:
     return out
 
 
-def _components(cells: list[str], tess: Tessellation) -> list[list[str]]:
-    """Connected components of the cell contiguity graph, largest first."""
-    remaining = set(cells)
-    out: list[list[str]] = []
-    while remaining:
-        seed = min(remaining)
-        remaining.discard(seed)
-        comp, stack = [seed], [seed]
-        while stack:
-            node = stack.pop()
-            for nb in tess.neighbours(node, 1):
-                if nb in remaining:
-                    remaining.discard(nb)
-                    comp.append(nb)
-                    stack.append(nb)
-        out.append(sorted(comp))
-    return sorted(out, key=len, reverse=True)
-
-
 def build_zones(
     panel: pd.DataFrame,
     *,
@@ -89,8 +70,12 @@ def build_zones(
     panel : DataFrame
         The (h3, month) panel with ``n_listings`` and ``price_azn_m2_median``.
     max_zones : int
-        Target number of zones. The actual count may be slightly lower when
-        cells form disconnected components.
+        Target number of zones. Treated as a target, not a hard cap: every
+        disconnected component of the cell graph needs at least one zone (a
+        zone spanning two islands would not be one place), so a fragmented
+        grid can yield more. The returned frame is authoritative - size
+        legends and palettes from ``zone_df["zone"].nunique()``, never from
+        ``max_zones``.
     density_weight : float
         Relative importance of listing density vs. spatial proximity in the
         clustering feature space (0 = pure spatial, 1 = density-dominated).
@@ -131,14 +116,14 @@ def build_zones(
     # disconnected connectivity matrix lets sklearn bridge the gaps, so
     # each component gets its own run and its own share of the zone budget.
     cell_idx = {c: i for i, c in enumerate(cells)}
-    comps = _components(cells, tess)
-    budget = _allocate(comps, max_zones)
+    comps = connected_components(cells, lambda c: tess.neighbours(c, 1))
+    budget = apportion([len(c) for c in comps], max_zones)
 
     labels = np.empty(n, dtype=int)
     next_label = 0
-    for comp in comps:
+    for comp_i, comp in enumerate(comps):
         idx = np.array([cell_idx[c] for c in comp], dtype=int)
-        k = budget[id(comp)]
+        k = budget[comp_i]
         if k >= len(comp):
             labels[idx] = np.arange(next_label, next_label + len(comp))
             next_label += len(comp)
@@ -164,27 +149,6 @@ def build_zones(
         "zone": labels,
         "zone_name": [f"Zone {lab + 1}" for lab in labels],
     })
-
-
-def _allocate(components: list[list[str]], total: int) -> dict[int, int]:
-    """Share `total` zones across components by size (>= 1 each).
-
-    Largest-remainder apportionment, capped so no component is asked for
-    more zones than it has cells.
-    """
-    n_cells = sum(len(c) for c in components)
-    total = max(total, len(components))
-    exact = {
-        id(c): 1 + (total - len(components)) * len(c) / n_cells for c in components
-    }
-    floors = {k: int(np.floor(v)) for k, v in exact.items()}
-    short = total - sum(floors.values())
-    order = sorted(components, key=lambda c: -(exact[id(c)] - floors[id(c)]))
-    for c in order[:max(0, short)]:
-        floors[id(c)] += 1
-    for c in components:
-        floors[id(c)] = min(floors[id(c)], len(c))
-    return floors
 
 
 def zones_to_geojson(

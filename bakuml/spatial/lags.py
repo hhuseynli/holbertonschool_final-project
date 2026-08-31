@@ -43,9 +43,9 @@ from bakuml.spatial.tessellation import Tessellation
 def _neighbours(cell: str, k: int, tess: Tessellation | None = None) -> tuple[str, ...]:
     """k-step neighbourhood of `cell`, excluding the cell itself.
 
-    Delegated to the active tessellation, which memoises its own adjacency:
-    H3 computes k-rings analytically, while the fitted tessellations look
-    them up in a contiguity map built once at fit time.
+    Delegated to the active tessellation, which memoises the result per
+    (cell, k): H3 computes k-rings analytically, while the fitted
+    tessellations expand a contiguity map built once at fit time.
     """
     return tess_mod.resolve(tess).neighbours(cell, k)
 

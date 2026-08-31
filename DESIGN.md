@@ -132,7 +132,17 @@ sign). So the geometry is pluggable and the default is chosen by
   silently bridge islands.
 - Module state: `get_active()` / `set_active(tess)` / `resolve(tess)` /
   `reset_active()`, and `build(kind, **kwargs)` for `h3` / `kdtree` /
-  `market`.
+  `market`. `run_pipeline` installs the active tessellation inside a
+  `try/finally`, so a failed run never leaves the global pointing at it.
+- Shared helpers (used by both the market tessellation and `zones.py`):
+  `connected_components(cells, neighbours_fn)` and
+  `apportion(sizes, total)`. `apportion` returns **by index** and treats
+  `total` as a target: every disconnected component needs at least one
+  unit, so a fragmented grid legitimately exceeds it — callers must report
+  what was achieved, never assume the request.
+- Tuning constants live in `config`: `TESSELLATION`,
+  `TESSELLATION_KWARGS`, `TESS_PRICE_HOLDOUT_MONTHS`,
+  `CONFORMAL_CAL_MONTHS`, `CONFORMAL_HOLDOUT_MONTHS`.
 - Tests assert the shared contract for all three (total partition,
   symmetric contiguity, monotone k-rings, closed `[lon, lat]` rings, blocks
   coarser than cells, panel builds) plus each one's reason to exist: equal
@@ -141,32 +151,41 @@ sign). So the geometry is pluggable and the default is chosen by
 
 ## 3. `bakuml/spatial/` — spatial backbone (tessellation-agnostic)
 
+- Every function takes a keyword `tess: Tessellation | None = None` and
+  falls back to the active tessellation.
 - `grid.py`:
-  - `assign_cells(listings, res=config.H3_RESOLUTION) -> pd.DataFrame`
+  - `assign_cells(listings, res=None, *, tess=None) -> pd.DataFrame`
+    (`res` is an H3 shortcut; passing both `res` and `tess` raises)
     (copy with added `h3` column).
   - `build_cell_month_panel(listings, min_listings=config.MIN_LISTINGS_PER_CELL_MONTH)
     -> pd.DataFrame` — aggregates to `PANEL_BASE_COLUMNS`
     (median/mean of `price_azn_m2`, count, share of `building_type=="new"`),
     keeps only rows with `n_listings >= min_listings`, sorted by (h3, month).
+  - `filter_land_cells(listings, *, tess=None) -> pd.DataFrame` — drops rows
+    whose cell centroid falls outside `config.LAND_POLYGON_LONLAT`.
   - `complete_panel(panel, months: list[str]) -> pd.DataFrame` — reindex to
     the full cells × months rectangle; missing rows get `n_listings=0` and
     NaN prices (needed for tensors).
-  - `cell_centroids(cells: list[str]) -> pd.DataFrame[h3, lat, lon]`.
-  - `cells_to_geojson(cells: list[str], properties: dict[str, dict] | None = None)
-    -> dict` — GeoJSON FeatureCollection of hexagon polygons, `id`=h3,
+  - `cell_centroids(cells: list[str], *, tess=None) -> pd.DataFrame[h3, lat, lon]`
+    — the tessellation's representative point; for the KD-tree this is the
+    *mean position of the cell's listings*, not the box centre (a periphery
+    rectangle's geometric centre can be kilometres from any advert).
+  - `cells_to_geojson(cells: list[str], properties: dict[str, dict] | None = None,
+    *, tess=None) -> dict` — GeoJSON FeatureCollection of hexagon polygons, `id`=h3,
     lon/lat ring order (GeoJSON convention!), optional per-cell properties.
 - `lags.py`:
-  - `spatial_lag(panel, value_col: str, k: int = 1) -> pd.Series` — same-month
-    mean of `value_col` over `grid_disk(h3, k)` **excluding self**; aligned to
+  - `spatial_lag(panel, value_col: str, k: int = 1, *, tess=None) -> pd.Series` — same-month
+    mean of `value_col` over the cell's `k`-step neighbourhood **excluding self**; aligned to
     `panel.index`; NaN when no neighbour has data.
-  - `neighbour_target_encoding(panel, target_col: str, months_lag: int = 1)
-    -> pd.Series` — neighbour mean of `target_col` taken from month `t - months_lag`
+  - `neighbour_target_encoding(panel, target_col: str, months_lag: int = 1,
+    *, tess=None) -> pd.Series` — neighbour mean of `target_col` taken from month `t - months_lag`
     (leakage-safe by construction).
 - `graph.py`:
-  - `build_adjacency(cells: list[str]) -> tuple[np.ndarray, list[str]]` —
+  - `build_adjacency(cells: list[str], *, tess=None) -> tuple[np.ndarray, list[str]]` —
     dense symmetric normalized adjacency `D^-1/2 (A+I) D^-1/2` over h3
     neighbour relations restricted to `cells`; returns (matrix, cell order).
-  - `edge_index(cells: list[str]) -> np.ndarray` shape (2, E), both directions.
+  - `edge_index(cells: list[str], *, tess=None) -> np.ndarray` shape (2, E),
+    both directions.
 
 ## 4. `bakuml/features/` — Master Plan 2040 & infrastructure (imports spatial)
 
@@ -234,10 +253,11 @@ Natural experiment: staggered metro expansion; treatment station
   -> list[tuple[list[str], list[str]]]` — expanding window; train strictly
   before test; last split's test ends at the final month.
 - `spatial_cv.py: spatial_block_folds(cells: list[str], *,
-  n_folds=config.SPATIAL_CV_FOLDS, block_res=config.H3_BLOCK_RESOLUTION,
-  seed=0) -> dict[str, int]` — cells grouped by `cell_to_parent(block_res)`;
-  whole blocks assigned to folds, greedily balancing cell counts. Every
-  cell mapped to exactly one fold 0..n_folds-1.
+  n_folds=config.SPATIAL_CV_FOLDS, block_res=None, seed=0, tess=None)
+  -> dict[str, int]` — cells grouped by `Tessellation.block`; whole blocks
+  assigned to folds, greedily balancing cell counts. Every cell mapped to
+  exactly one fold 0..n_folds-1. `block_res` is an H3-only shortcut,
+  mutually exclusive with `tess`.
 
 ## 7. `bakuml/models/` — Tier 1 baseline, conformal intervals, Tier 2 STGCN
 
@@ -256,7 +276,8 @@ list; they never call `bakuml.features` themselves.
     — per-split and aggregate `mae, mape, r2`, plus the same metrics for a
     **naive persistence baseline** (`lag_own_1m` as the prediction);
     keys: `splits: list[...]`, `aggregate: {...}`, `naive: {...}`.
-  - `evaluate_spatial_cv(fm, feature_cols, *, target=..., n_folds=5, seed=0)
+  - `evaluate_spatial_cv(fm, feature_cols, *, target=..., n_folds=5, seed=0,
+    block_res=None, exclude_features=None)
     -> dict` — GroupKFold-style over `spatial_block_folds`, same metric keys.
   - `shap_summary(tb: TrainedBaseline, fm, top_k=15) -> dict[str, float]` —
     mean |SHAP| per feature, sorted desc, JSON-safe floats.

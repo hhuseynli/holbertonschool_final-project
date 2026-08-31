@@ -210,12 +210,42 @@ def hex_layer_geojson(
     if geometry is not None:
         geojson = _subset_geometry(geometry, cells, properties)
     else:
+        _require_h3_ids(cells)
         geojson = cells_to_geojson(cells, properties=properties)
     return geojson, colormap
 
 
+#: Cell ids produced by the fitted tessellations carry a namespace prefix.
+_FITTED_ID_PREFIXES = ("kd:", "mr:", "blk:")
+
+
+def _require_h3_ids(cells: list[str]) -> None:
+    """Fail clearly when cells need geometry that was not supplied.
+
+    Without the run's ``cell_geometry`` artifact the only geometry available
+    is the active tessellation's, and for a fitted tessellation that is not
+    reconstructible outside the run. Rather than let h3 raise something
+    opaque about an unparseable index, say what is actually wrong.
+    """
+    bad = [c for c in cells if str(c).startswith(_FITTED_ID_PREFIXES)]
+    if bad:
+        raise ValueError(
+            f"{len(bad)} of {len(cells)} cells (e.g. {bad[0]!r}) come from a "
+            "fitted tessellation, whose polygons only exist in the run that "
+            f"built them. The '{ARTIFACT_FILES['cell_geometry']}' artifact is "
+            "missing or was not passed as geometry= - re-run the pipeline "
+            "(make demo / make full) to regenerate it."
+        )
+
+
 def _subset_geometry(geometry: dict, cells: list[str], properties: dict) -> dict:
-    """Take the stored polygons for `cells` and attach metric properties."""
+    """Take the stored polygons for `cells` and attach metric properties.
+
+    A stale ``cell_geometry`` artifact (written by an earlier run with a
+    different tessellation) would otherwise match nothing and render a blank
+    map with no error at all, while the colormap bounds still came from the
+    full value set - so a total miss is raised rather than drawn.
+    """
     by_id = {
         feat.get("id") or (feat.get("properties") or {}).get("h3"): feat
         for feat in geometry.get("features", [])
@@ -232,6 +262,12 @@ def _subset_geometry(geometry: dict, cells: list[str], properties: dict) -> dict
                 "geometry": feat["geometry"],
                 "properties": {"h3": cell, **properties.get(cell, {})},
             }
+        )
+    if cells and not features:
+        raise ValueError(
+            f"none of the {len(cells)} predicted cells appear in the stored "
+            "cell geometry: the artifacts are inconsistent (geometry from a "
+            "different run or tessellation). Re-run the pipeline."
         )
     return {"type": "FeatureCollection", "features": features}
 

@@ -52,6 +52,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable
 from typing import Protocol, runtime_checkable
 
 import h3
@@ -64,6 +65,54 @@ from bakuml.geo import haversine_km
 # Metres per degree of latitude; longitude is scaled by cos(lat) so that
 # "the wider dimension" is measured in comparable units.
 _M_PER_DEG_LAT = np.pi / 180.0 * 6_371_008.8
+
+
+def connected_components(
+    cells: list[str], neighbours: "Callable[[str], Iterable[str]]"
+) -> list[list[str]]:
+    """Components of a contiguity graph, largest first.
+
+    Shared by the market tessellation and the zone layer: the observed grid
+    is not one blob (Sumgait, Alat and the Absheron villages are islands),
+    and any clustering under a connectivity constraint must respect that.
+    """
+    remaining = set(cells)
+    out: list[list[str]] = []
+    while remaining:
+        seed = min(remaining)
+        remaining.discard(seed)
+        comp, stack = [seed], [seed]
+        while stack:
+            node = stack.pop()
+            for nb in neighbours(node):
+                if nb in remaining:
+                    remaining.discard(nb)
+                    comp.append(nb)
+                    stack.append(nb)
+        out.append(sorted(comp))
+    return sorted(out, key=len, reverse=True)
+
+
+def apportion(sizes: list[int], total: int) -> list[int]:
+    """Share `total` units across groups by size, at least 1 each.
+
+    Largest-remainder apportionment, capped so no group is asked for more
+    units than it has members. Returned by *index*, not keyed by object
+    identity. When there are more groups than units the result necessarily
+    sums above `total` - every disconnected group needs at least one unit,
+    or it would be merged into a discontiguous one - so callers should treat
+    the request as a target and report what was achieved.
+    """
+    n_groups = len(sizes)
+    n_members = sum(sizes) or 1
+    budget = max(total, n_groups)
+    exact = [1 + (budget - n_groups) * sz / n_members for sz in sizes]
+    floors = [int(np.floor(v)) for v in exact]
+    short = budget - sum(floors)
+    order = sorted(range(n_groups), key=lambda i: -(exact[i] - floors[i]))
+    for i in order[: max(0, short)]:
+        floors[i] += 1
+    return [min(floors[i], sizes[i]) for i in range(n_groups)]
 
 
 @runtime_checkable
@@ -93,10 +142,24 @@ class _BaseTessellation:
 
     name = "base"
 
+    def __init__(self) -> None:
+        self._nbr_cache: dict[tuple[str, int], tuple[str, ...]] = {}
+
     def neighbours(self, cell: str, k: int = 1) -> tuple[str, ...]:
-        """BFS to depth `k` over the 1-step contiguity graph."""
+        """BFS to depth `k` over the 1-step contiguity graph (memoised).
+
+        Callers hit this once per panel cell per feature, so the result is
+        cached: an instance-level dict rather than ``lru_cache``, which would
+        key on ``self`` and keep every fitted tessellation alive.
+        """
         if k < 1:
             raise ValueError("k must be >= 1")
+        cache = getattr(self, "_nbr_cache", None)
+        if cache is None:  # subclass skipped __init__
+            cache = self._nbr_cache = {}
+        hit = cache.get((cell, k))
+        if hit is not None:
+            return hit
         seen = {cell}
         frontier = deque([(cell, 0)])
         out: list[str] = []
@@ -109,7 +172,9 @@ class _BaseTessellation:
                     seen.add(nb)
                     out.append(nb)
                     frontier.append((nb, depth + 1))
-        return tuple(out)
+        result = tuple(out)
+        cache[(cell, k)] = result
+        return result
 
     def _neighbours1(self, cell: str) -> tuple[str, ...]:
         raise NotImplementedError
@@ -133,6 +198,7 @@ class H3Tessellation(_BaseTessellation):
     ):
         if block_resolution > resolution:
             raise ValueError("block_resolution must be coarser than resolution")
+        super().__init__()
         self.resolution = resolution
         self.block_resolution = block_resolution
         self.name = f"h3_res{resolution}"
@@ -156,10 +222,15 @@ class H3Tessellation(_BaseTessellation):
         return tuple(n for n in h3.grid_disk(cell, 1) if n != cell)
 
     def neighbours(self, cell: str, k: int = 1) -> tuple[str, ...]:
-        # h3 gives k-rings directly - cheaper than the generic BFS.
+        # h3 gives k-rings analytically - cheaper than the generic BFS -
+        # but still worth caching at panel scale.
         if k < 1:
             raise ValueError("k must be >= 1")
-        return tuple(n for n in h3.grid_disk(cell, k) if n != cell)
+        hit = self._nbr_cache.get((cell, k))
+        if hit is None:
+            hit = tuple(n for n in h3.grid_disk(cell, k) if n != cell)
+            self._nbr_cache[(cell, k)] = hit
+        return hit
 
     def boundary(self, cell: str) -> list[tuple[float, float]]:
         return [tuple(v) for v in h3.cell_to_boundary(cell)]
@@ -190,6 +261,13 @@ class _KDLeaf:
     lon_min: float
     lon_max: float
     n: int
+    #: Mean position of the listings inside the leaf. A periphery leaf can be
+    #: a huge rectangle whose geometric centre sits in empty desert or open
+    #: sea, kilometres from any advert, so distance features (to the centre,
+    #: to metro, to Master Plan nodes) must be measured from where the
+    #: listings actually are. Falls back to the box centre for empty leaves.
+    lat_mean: float = float("nan")
+    lon_mean: float = float("nan")
 
 
 class AdaptiveKDTessellation(_BaseTessellation):
@@ -210,7 +288,10 @@ class AdaptiveKDTessellation(_BaseTessellation):
     geography carries no outcome information. Cell ids are the binary split
     path (``kd:0110``), which makes ``block()`` free: truncating the path to
     ``block_depth`` characters yields contiguous super-cells, since every KD
-    prefix is a rectangle.
+    prefix is a rectangle. The effective depth is capped below the tree's
+    own depth: a shallow tree truncated at a depth it never reached would
+    give one block per cell, silently turning spatially blocked CV into the
+    random k-fold the project forbids.
     """
 
     def __init__(
@@ -223,12 +304,14 @@ class AdaptiveKDTessellation(_BaseTessellation):
         block_depth: int = 3,
         min_span_m: float = 250.0,
     ):
+        super().__init__()
         self.target_per_cell = int(target_per_cell)
         self.block_depth = int(block_depth)
         self.min_span_m = float(min_span_m)
         self.name = f"kdtree_n{target_per_cell}"
         self._leaves: dict[str, _KDLeaf] = {}
         self._nbr: dict[str, tuple[str, ...]] = {}
+        self._block_depth_eff: int = int(block_depth)
 
     # -- fitting ----------------------------------------------------------
 
@@ -248,6 +331,10 @@ class AdaptiveKDTessellation(_BaseTessellation):
         self._leaves = {}
         self._split(root, lat, lon)
         self._nbr = self._build_neighbours()
+        # Keep blocks strictly coarser than cells: with a tree of depth d,
+        # a prefix of length d would just re-label every leaf.
+        max_depth = max((len(lf.path) for lf in self._leaves.values()), default=0)
+        self._block_depth_eff = max(1, min(self.block_depth, max_depth - 1))
         return self
 
     def _split(self, node: _KDLeaf, lat: np.ndarray, lon: np.ndarray) -> None:
@@ -269,6 +356,8 @@ class AdaptiveKDTessellation(_BaseTessellation):
             self._leaves[f"kd:{node.path or 'r'}"] = _KDLeaf(
                 node.path, node.lat_min, node.lat_max,
                 node.lon_min, node.lon_max, int(lat.size),
+                float(lat.mean()) if lat.size else 0.5 * (node.lat_min + node.lat_max),
+                float(lon.mean()) if lon.size else 0.5 * (node.lon_min + node.lon_max),
             )
             return
 
@@ -352,8 +441,11 @@ class AdaptiveKDTessellation(_BaseTessellation):
         return out
 
     def centroid(self, cell: str) -> tuple[float, float]:
+        """Mean position of the leaf's listings (see :class:`_KDLeaf`)."""
         self._check_fitted()
         leaf = self._leaves[cell]
+        if np.isfinite(leaf.lat_mean) and np.isfinite(leaf.lon_mean):
+            return (leaf.lat_mean, leaf.lon_mean)
         return (0.5 * (leaf.lat_min + leaf.lat_max),
                 0.5 * (leaf.lon_min + leaf.lon_max))
 
@@ -374,7 +466,7 @@ class AdaptiveKDTessellation(_BaseTessellation):
     def block(self, cell: str) -> str:
         self._check_fitted()
         path = self._leaves[cell].path
-        return "blk:" + (path[: self.block_depth] or "r")
+        return "blk:" + (path[: self._block_depth_eff] or "r")
 
     def cells(self) -> list[str]:
         return sorted(self._leaves)
@@ -391,6 +483,7 @@ class AdaptiveKDTessellation(_BaseTessellation):
             "listings_per_cell_median": int(np.median(counts)),
             "listings_per_cell_max": int(max(counts)),
             "n_blocks": len({self.block(c) for c in self._leaves}),
+            "block_depth_effective": self._block_depth_eff,
         }
 
 
@@ -419,8 +512,11 @@ class MarketRegionTessellation(_BaseTessellation):
         *,
         base_resolution: int = config.H3_RESOLUTION,
         n_blocks: int = config.SPATIAL_CV_FOLDS,
+        min_listings_per_cell: int = config.MIN_LISTINGS_PER_CELL_MONTH,
     ):
+        super().__init__()
         self.n_regions = int(n_regions)
+        self.min_listings_per_cell = int(min_listings_per_cell)
         self.base_resolution = int(base_resolution)
         self.n_blocks = int(n_blocks)
         self.name = f"market_k{n_regions}"
@@ -471,9 +567,21 @@ class MarketRegionTessellation(_BaseTessellation):
             self._adopt_labels(cells, list(range(len(cells))))
             return self
 
-        # Standardise so price level and building mix weigh comparably.
+        # Standardise so price level and building mix weigh comparably,
+        # using count-weighted moments: a base cell holding one advert is a
+        # single-observation mean, i.e. noise, and must not set the scale.
+        # Cells below `min_listings_per_cell` are dropped outright, so
+        # boundaries are not drawn to chase sampling noise in the sparse
+        # periphery (the `n` column used to be computed and ignored).
+        keep = agg["n"] >= self.min_listings_per_cell
+        if keep.sum() > self.n_regions:
+            agg = agg[keep]
+            cells = list(agg.index)
+        w = agg["n"].to_numpy(dtype=float)
         x = agg[["logp", "new_share"]].to_numpy(dtype=float)
-        x = (x - x.mean(axis=0)) / np.where(x.std(axis=0) > 1e-12, x.std(axis=0), 1.0)
+        mu = np.average(x, axis=0, weights=w)
+        var = np.average((x - mu) ** 2, axis=0, weights=w)
+        x = (x - mu) / np.where(var > 1e-24, np.sqrt(var), 1.0)
 
         # The observed grid is not one connected blob: Sumgait, Alat and the
         # Absheron villages are islands separated by unobserved cells. Handing
@@ -482,15 +590,17 @@ class MarketRegionTessellation(_BaseTessellation):
         # islands into a single region. Instead each component is clustered on
         # its own, with the region budget shared out by component size - so
         # every region is genuinely contiguous, by construction.
-        components = self._connected_components(cells)
-        budget = self._allocate_regions(components, self.n_regions)
+        components = connected_components(
+            cells, lambda c: self._base.neighbours(c, 1)
+        )
+        budget = apportion([len(c) for c in components], self.n_regions)
 
         labels = np.empty(len(cells), dtype=int)
         pos = {c: i for i, c in enumerate(cells)}
         next_label = 0
-        for comp in components:
+        for comp_i, comp in enumerate(components):
             idx = np.array([pos[c] for c in comp], dtype=int)
-            k = budget[id(comp)]
+            k = budget[comp_i]
             if k >= len(comp):
                 # One region per cell: nothing to merge in this component.
                 labels[idx] = np.arange(next_label, next_label + len(comp))
@@ -517,47 +627,6 @@ class MarketRegionTessellation(_BaseTessellation):
 
         self._adopt_labels(cells, list(labels))
         return self
-
-    def _connected_components(self, cells: list[str]) -> list[list[str]]:
-        """Components of the base-cell contiguity graph, largest first."""
-        remaining = set(cells)
-        out: list[list[str]] = []
-        while remaining:
-            seed = min(remaining)
-            remaining.discard(seed)
-            comp = [seed]
-            stack = [seed]
-            while stack:
-                node = stack.pop()
-                for nb in self._base.neighbours(node, 1):
-                    if nb in remaining:
-                        remaining.discard(nb)
-                        comp.append(nb)
-                        stack.append(nb)
-            out.append(sorted(comp))
-        return sorted(out, key=len, reverse=True)
-
-    @staticmethod
-    def _allocate_regions(components: list[list[str]], total: int) -> dict[int, int]:
-        """Share `total` regions across components by size (>= 1 each).
-
-        Largest-remainder apportionment, so the budget is respected exactly
-        whenever there are at least as many cells as regions.
-        """
-        n_cells = sum(len(c) for c in components)
-        total = max(total, len(components))  # every component needs >= 1
-        exact = {id(c): 1 + (total - len(components)) * len(c) / n_cells
-                 for c in components}
-        floors = {k: int(np.floor(v)) for k, v in exact.items()}
-        short = total - sum(floors.values())
-        # Hand the leftovers to the components with the largest remainders.
-        order = sorted(components, key=lambda c: -(exact[id(c)] - floors[id(c)]))
-        for c in order[:max(0, short)]:
-            floors[id(c)] += 1
-        # Never allocate more regions than a component has cells.
-        for c in components:
-            floors[id(c)] = min(floors[id(c)], len(c))
-        return floors
 
     def _adopt_labels(self, cells: list[str], labels: list[int]) -> None:
         """Materialise regions, their geometry, adjacency and CV blocks."""
@@ -607,33 +676,49 @@ class MarketRegionTessellation(_BaseTessellation):
         return [(lat, lng) for lng, lat in merged.exterior.coords[:-1]]
 
     def _build_blocks(self) -> dict[str, str]:
-        """Group regions into `n_blocks` contiguous blocks (BFS growth)."""
+        """Group regions into `n_blocks` contiguous, size-balanced blocks.
+
+        Two failure modes to avoid. Growing one block per BFS seed and
+        letting the last one "absorb the rest" leaves early blocks
+        under-filled and dumps the majority into a final block that is
+        itself several disconnected pieces - which makes blocked CV a
+        lopsided two-way split with near-empty folds, and misattributes the
+        resulting bad score to the tessellation rather than the folds.
+
+        So: cut each connected component into contiguous chunks of roughly
+        the target size, then bin-pack whole chunks onto blocks
+        largest-first (LPT). Every chunk is contiguous by construction and
+        the blocks come out balanced.
+        """
         regions = sorted(self._members)
         if len(regions) <= self.n_blocks:
             return {r: f"blk:{i}" for i, r in enumerate(regions)}
 
         target = max(1, len(regions) // self.n_blocks)
-        unassigned = set(regions)
+        chunks: list[list[str]] = []
+        for comp in connected_components(regions, lambda r: self._nbr.get(r, ())):
+            remaining = set(comp)
+            while remaining:
+                seed = min(remaining)
+                remaining.discard(seed)
+                chunk, frontier = [seed], deque([seed])
+                while frontier and len(chunk) < target:
+                    node = frontier.popleft()
+                    for nb in self._nbr.get(node, ()):
+                        if nb in remaining and len(chunk) < target:
+                            remaining.discard(nb)
+                            chunk.append(nb)
+                            frontier.append(nb)
+                chunks.append(chunk)
+
+        # LPT bin-packing: biggest chunk onto the currently smallest block.
+        sizes = [0] * self.n_blocks
         block_of: dict[str, str] = {}
-        b = 0
-        while unassigned:
-            seed = min(unassigned)
-            grown = [seed]
-            unassigned.discard(seed)
-            frontier = deque([seed])
-            # Last block absorbs whatever is left, keeping blocks contiguous.
-            cap = target if b < self.n_blocks - 1 else len(regions)
-            while frontier and len(grown) < cap:
-                node = frontier.popleft()
-                for nb in self._nbr.get(node, ()):
-                    if nb in unassigned and len(grown) < cap:
-                        unassigned.discard(nb)
-                        grown.append(nb)
-                        frontier.append(nb)
-            label = f"blk:{min(b, self.n_blocks - 1)}"
-            for r in grown:
-                block_of[r] = label
-            b += 1
+        for chunk in sorted(chunks, key=len, reverse=True):
+            b = min(range(self.n_blocks), key=lambda k: (sizes[k], k))
+            for r in chunk:
+                block_of[r] = f"blk:{b}"
+            sizes[b] += len(chunk)
         return block_of
 
     # -- interface --------------------------------------------------------

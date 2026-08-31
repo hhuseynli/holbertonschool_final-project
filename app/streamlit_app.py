@@ -29,6 +29,8 @@ from pathlib import Path
 import folium
 import h3
 import pandas as pd
+from shapely.geometry import Point as ShapelyPoint
+from shapely.geometry import Polygon as ShapelyPolygon
 import plotly.graph_objects as go
 import streamlit as st
 from streamlit_folium import st_folium
@@ -61,6 +63,24 @@ def _gradient_legend(cmap, label: str) -> str:
         f"<span>{cmap.vmin:,.1f}</span><span>{cmap.vmax:,.1f}</span></div></div>"
     )
 _ACCENT = "#1565c0"
+
+#: Keyless basemaps. OSM is the default; its volunteer tile servers refuse
+#: some datacentre/proxy IPs with a "usage policy" tile, and Carto's keyless
+#: endpoint now stamps "API KEY REQUIRED" across every tile - so the choice
+#: is exposed rather than hard-coded, and the choropleth stays readable even
+#: when a provider declines to serve.
+_BASEMAPS: dict[str, tuple[str | None, str]] = {
+    "OpenStreetMap": (
+        "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        "&copy; OpenStreetMap contributors",
+    ),
+    "Esri light grey": (
+        "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/"
+        "World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+        "Tiles &copy; Esri",
+    ),
+    "None (data only)": (None, ""),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +143,8 @@ metric = st.sidebar.selectbox(
     "Map metric", list(viz.METRIC_LABELS), format_func=viz.METRIC_LABELS.get
 )
 
+basemap = st.sidebar.selectbox("Basemap", list(_BASEMAPS))
+
 st.sidebar.divider()
 st.sidebar.markdown(
     "**Map legend**  \n"
@@ -160,8 +182,12 @@ else:
     _layer_name = "cells"
 layer_cells = {feat["id"] for feat in geojson["features"]}
 
+_tile_url, _attr = _BASEMAPS[basemap]
 fmap = folium.Map(
-    location=list(config.CITY_CENTRE), zoom_start=11, tiles="OpenStreetMap"
+    location=list(config.CITY_CENTRE),
+    zoom_start=11,
+    tiles=_tile_url,
+    attr=_attr or None,
 )
 
 folium.GeoJson(
@@ -235,17 +261,50 @@ st.markdown(
 )
 
 
-def _selected_cell(state: dict | None, panel_cells: set[str]) -> str | None:
-    """Resolve a map click to an H3 cell id.
+@st.cache_data(show_spinner=False)
+def _cell_shapes(geometry: dict | None, signature: tuple) -> list[tuple[str, object]]:
+    """(cell id, shapely polygon) for the run's cells, built once per run.
 
-    Works for both zone and hex layers: converts the raw click lat/lng
-    into an H3 cell and checks it exists in the panel.
+    ``signature`` only participates in the cache key.
+    """
+    if not geometry:
+        return []
+    out = []
+    for feat in geometry.get("features", []):
+        cell = feat.get("id") or (feat.get("properties") or {}).get("h3")
+        geom = feat.get("geometry") or {}
+        if cell is None or geom.get("type") != "Polygon":
+            continue
+        ring = [(x, y) for x, y in geom["coordinates"][0]]
+        if len(ring) >= 4:
+            out.append((cell, ShapelyPolygon(ring)))
+    return out
+
+
+def _selected_cell(
+    state: dict | None,
+    panel_cells: set[str],
+    shapes: list[tuple[str, object]],
+) -> str | None:
+    """Resolve a map click to a cell id of the *active* tessellation.
+
+    The click must be located by geometry, not by recomputing an H3 index:
+    cell ids may be H3 indices, KD paths or region ids, and only the run's
+    own ``cell_geometry`` artifact knows which polygon is where. Falls back
+    to an H3 lookup when no geometry shipped with the run *and* the panel
+    actually holds H3 ids, so pre-tessellation artifacts still work.
     """
     if not state:
         return None
     clicked = state.get("last_object_clicked") or {}
     lat, lng = clicked.get("lat"), clicked.get("lng")
-    if lat is not None and lng is not None:
+    if lat is None or lng is None:
+        return None
+    point = ShapelyPoint(float(lng), float(lat))
+    for cell, poly in shapes:
+        if poly.contains(point) and cell in panel_cells:
+            return cell
+    if not shapes:
         cell = h3.latlng_to_cell(float(lat), float(lng), config.H3_RESOLUTION)
         if cell in panel_cells:
             return cell
@@ -253,7 +312,10 @@ def _selected_cell(state: dict | None, panel_cells: set[str]) -> str | None:
 
 
 _panel_cells = set(panel["h3"].unique())
-selected = _selected_cell(map_state, _panel_cells)
+_shapes = _cell_shapes(
+    artifacts.get("cell_geometry"), _artifact_signature(config.ARTIFACTS_DIR)
+)
+selected = _selected_cell(map_state, _panel_cells, _shapes)
 
 # ---------------------------------------------------------------------------
 # Selected-cell detail
@@ -337,7 +399,7 @@ def _fan_figure(hist: pd.DataFrame, forecast: pd.DataFrame, base_month: str) -> 
 
 
 if selected is None:
-    st.info("Click a hexagon on the map to inspect its history, forecast, and features.")
+    st.info("Click a cell on the map to inspect its history, forecast, and features.")
 else:
     st.subheader(f"Cell {selected}")
     hist = viz.cell_history(panel, selected)

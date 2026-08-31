@@ -41,6 +41,28 @@ H3_RESOLUTION = 8
 #: swings by 0.48 and changes sign. Set to "h3" to reproduce the baseline.
 TESSELLATION = "kdtree"
 
+#: Keyword arguments handed to the tessellation named above. Keeping them
+#: here (rather than as defaults buried in the class) means the value the
+#: MAUP study actually recommends is visible and overridable in one place.
+TESSELLATION_KWARGS: dict[str, dict] = {
+    # 140 listings/cell is what scripts/maup_study.py recommends on this
+    # panel: best spatial-transfer skill among candidates that keep most of
+    # the data and give the median cell >= 12 months of history.
+    "kdtree": {"target_per_cell": 140, "block_depth": 3, "min_span_m": 250.0},
+    "h3": {},
+    "market": {"n_regions": 120},
+}
+
+#: Months withheld from *price-driven* tessellation fitting. Must stay
+#: strictly greater than the conformal calibration + holdout windows
+#: (CONFORMAL_CAL_MONTHS + CONFORMAL_HOLDOUT_MONTHS) so the geography never
+#: sees a price it is later scored on, with margin to spare.
+TESS_PRICE_HOLDOUT_MONTHS = 12
+
+#: Conformal split sizes (months), used by the pipeline.
+CONFORMAL_CAL_MONTHS = 6
+CONFORMAL_HOLDOUT_MONTHS = 3
+
 # Coarser parent resolution used to form contiguous spatial CV blocks.
 # Res 6 parents (~36 km^2) give ~19 contiguous blocks over the study area;
 # res 5 collapses to so few parents that folds degenerate.

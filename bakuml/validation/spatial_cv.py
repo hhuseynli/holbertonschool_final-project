@@ -1,4 +1,4 @@
-"""Spatial validation: blocked cross-validation folds over H3 parent cells.
+"""Spatial validation: blocked cross-validation folds over coarse-block cells.
 
 Why blocked folds?  Prices are spatially autocorrelated: two adjacent H3
 cells share amenities, building stock and buyers.  If neighbouring cells
@@ -8,7 +8,7 @@ overstates how well the model generalises to genuinely unseen areas
 (Roberts et al. 2017, "Cross-validation strategies for data with temporal,
 spatial, hierarchical, or phylogenetic structure").
 
-The fix used here: group resolution-8 cells by their coarser H3 parent
+The fix used here: group resolution-8 cells by their coarser coarse-block
 (``config.H3_BLOCK_RESOLUTION``), so whole contiguous neighbourhoods are
 held out together, then assign whole blocks to folds.  Balancing uses the
 classic greedy longest-processing-time heuristic: blocks are taken in
@@ -44,7 +44,7 @@ def spatial_block_folds(
     is mapped to exactly one fold.
 
     ``block_res`` is an H3-specific shortcut retained for the documented
-    baseline: when given, blocks are H3 parents at that resolution. It is
+    baseline: when given, blocks are coarse-blocks at that resolution. It is
     mutually exclusive with ``tess``.
     """
     if n_folds < 1:

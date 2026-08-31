@@ -302,27 +302,70 @@ def test_market_regions_ignore_post_cutoff_prices(listings):
     assert list(a.assign(lat, lon)) == list(b.assign(lat, lon))
 
 
+def _region_pieces(tess, members: list[str]) -> int:
+    """How many disconnected pieces a set of base cells falls into."""
+    from bakuml.spatial.tessellation import connected_components
+
+    base = tess._base
+    member_set = set(members)
+    comps = connected_components(
+        members, lambda c: [n for n in base.neighbours(c, 1) if n in member_set]
+    )
+    return len(comps)
+
+
 def test_market_regions_are_contiguous(fitted):
-    """Ward under a connectivity constraint must never produce a region in
-    two disconnected pieces."""
+    """Ward under a connectivity constraint must never split a region.
+
+    Contiguity is measured against the *base grid's own* components: an
+    island cannot be joined to the mainland, so a region is well-formed
+    when its pieces are pieces of the observed grid, not of the region.
+    """
     tess = fitted["market"]
+    base = tess._base
+    all_cells = list(tess._member_of)
+    from bakuml.spatial.tessellation import connected_components
+
+    grid_comp = {}
+    for i, comp in enumerate(
+        connected_components(all_cells, lambda c: base.neighbours(c, 1))
+    ):
+        for c in comp:
+            grid_comp[c] = i
+
     for rid, members in tess._members.items():
-        base = tess._base
-        member_set = set(members)
-        seen = {members[0]}
-        stack = [members[0]]
-        while stack:
-            node = stack.pop()
-            for nb in base.neighbours(node, 1):
-                if nb in member_set and nb not in seen:
-                    seen.add(nb)
-                    stack.append(nb)
-        # Disconnected base cells can only appear where the observed grid
-        # itself is disconnected (islands like Sumgait / Alat).
-        if seen != member_set:
-            unreachable = member_set - seen
-            for cell in unreachable:
-                assert not (set(base.neighbours(cell, 1)) & seen)
+        # every member must sit in one component of the observed grid...
+        assert len({grid_comp[c] for c in members}) == 1, (
+            f"region {rid} spans disconnected parts of the grid"
+        )
+        # ...and be a single connected piece within it
+        assert _region_pieces(tess, members) == 1, f"region {rid} is split"
+
+
+def test_contiguity_test_can_actually_fail(fitted):
+    """Guard the guard: the assertions above must reject a broken region.
+
+    The obvious formulation of this test (BFS from one member and compare
+    against the member set) is tautological - unreachable members are by
+    definition non-adjacent to the reached set - so it passes even for a
+    region deliberately built from two separate places. This asserts the
+    real check rejects exactly that.
+    """
+    tess = fitted["market"]
+    regions = sorted(tess._members)
+    # Find two regions that do not touch, and pretend they are one.
+    for a in regions:
+        far = [
+            b for b in regions
+            if b != a and b not in tess.neighbours(a, 2) and b != a
+        ]
+        if far:
+            merged = tess._members[a] + tess._members[far[0]]
+            assert _region_pieces(tess, merged) > 1, (
+                "merging two non-adjacent regions must register as split"
+            )
+            return
+    pytest.skip("fixture has no pair of non-adjacent regions")
 
 
 # --------------------------------------------------------------------------
