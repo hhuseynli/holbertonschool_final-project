@@ -34,6 +34,7 @@ LISTING_COLUMNS: dict[str, str] = {
     "title": "str",
     "description": "str",
     "image_phash": "str",     # 16-char hex perceptual hash of the cover photo
+    "photo_urls": "str",      # JSON array of photo URLs (empty "[]" if unavailable)
     "district": "str",
 }
 

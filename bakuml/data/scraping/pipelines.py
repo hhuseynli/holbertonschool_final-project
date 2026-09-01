@@ -1,7 +1,7 @@
-"""Item pipelines + pure parsing helpers for bina.az adverts.
+"""Parsing helpers and normalisation for bina.az listings.
 
-All text parsing lives here as **pure functions** (no scrapy imports needed
-to use them) so the tricky Azerbaijani formats can be unit-tested offline:
+All text parsing lives here as **pure functions** so the tricky Azerbaijani
+formats can be unit-tested offline:
 
 * prices with grouped thousands: ``"150 000 AZN"`` (regular, no-break or thin
   spaces), occasionally ``"150.000 AZN"``;
@@ -16,32 +16,17 @@ Python's ``str.lower`` maps ``"İ"`` to ``"i" + COMBINING DOT ABOVE``, which
 breaks naive substring matching ("İyun" would not contain "iyun"). ``_az_lower``
 performs the Azerbaijani-correct case fold first.
 
-Pipelines:
-
-``NormalizePipeline``
-    Maps a raw :class:`~bakuml.data.scraping.items.ListingItem` onto the
-    canonical ``schema.LISTING_COLUMNS`` row: ``listing_id`` prefixed
-    ``"BINA-"``, ``source="bina.az"``, parsed numeric fields, derived
-    ``price_azn_m2``. Rows without a usable price, area or coordinates are
-    dropped (``scrapy.exceptions.DropItem``) — everything else degrades to
-    documented sentinels (0 for unknown rooms/floors, scrape month for an
-    unparseable listing date).
-
-``PhashPipeline``
-    Computes the perceptual hash of the cover photo *if* image bytes were
-    attached to the row (key ``image_bytes``). The polite offline-friendly
-    default crawl never downloads photos, so the hash degrades gracefully to
-    ``""`` — the dedup module treats an empty hash as "no photo evidence".
+The :func:`normalize_graphql_node` function maps a flattened GraphQL node
+(from :mod:`bakuml.data.scraping.client`) onto the canonical
+``schema.LISTING_COLUMNS`` row.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import io
+import json
 import re
-
-from itemadapter import ItemAdapter
-from scrapy.exceptions import DropItem
 
 from bakuml.data.schema import LISTING_COLUMNS
 
@@ -57,7 +42,7 @@ AZ_MONTHS: dict[str, int] = {
 }
 
 # Unicode spaces seen in scraped price strings (NBSP, thin/narrow spaces).
-_EXOTIC_SPACES = (" ", " ", " ", " ")
+_EXOTIC_SPACES = ("\u00a0", "\u2009", "\u202f", "\u2007")
 
 
 def _az_lower(text: str) -> str:
@@ -189,92 +174,65 @@ def phash_hex(image_bytes: bytes | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Pipelines
+# GraphQL node normalisation
 # ---------------------------------------------------------------------------
 
-def _to_float(value) -> float | None:
-    try:
-        result = float(value)
-    except (TypeError, ValueError):
+def normalize_graphql_node(node: dict, today: dt.date | None = None) -> dict | None:
+    """Map a flattened GraphQL listing node to a canonical LISTING_COLUMNS row.
+
+    Returns None (skip) when critical fields (price, area, coordinates) are
+    missing or invalid.
+    """
+    today = today or dt.date.today()
+
+    price = node.get("price")
+    area = node.get("area")
+    lat = node.get("lat")
+    lon = node.get("lon")
+
+    if price is None or price <= 0:
         return None
-    return result if result == result else None  # reject NaN
+    if area is None or area <= 0:
+        return None
+    if lat is None or lon is None:
+        return None
 
+    raw_id = node.get("listing_id")
+    if not raw_id:
+        path = node.get("path") or ""
+        raw_id = path.rstrip("/").rsplit("/", 1)[-1] or "unknown"
 
-class NormalizePipeline:
-    """ListingItem -> canonical ``schema.LISTING_COLUMNS`` dict.
+    rooms = node.get("rooms")
+    floor = node.get("floor")
+    floors = node.get("floors")
 
-    ``today`` is injectable so tests (and re-runs over archived HTML) resolve
-    "bugün"/"dünən" deterministically; the live crawl uses the scrape date.
-    """
+    # Derive listed_month from updatedAt ISO timestamp
+    updated_at = node.get("updated_at") or ""
+    if updated_at and len(updated_at) >= 7:
+        listed_month = updated_at[:7]  # "YYYY-MM" from ISO string
+    else:
+        listed_month = f"{today:%Y-%m}"
 
-    def __init__(self, today: dt.date | None = None) -> None:
-        self.today = today or dt.date.today()
+    has_repair = node.get("has_repair")
+    building_type = "new" if has_repair else "old"
 
-    def process_item(self, item, spider=None):
-        raw = ItemAdapter(item) if not isinstance(item, dict) else item
-
-        price = parse_price(raw.get("price_raw"))
-        area = parse_area(raw.get("area_raw"))
-        lat = _to_float(raw.get("lat"))
-        lon = _to_float(raw.get("lon"))
-        if price is None or area is None or lat is None or lon is None:
-            raise DropItem(
-                f"listing {raw.get('listing_id') or raw.get('url')}: "
-                "missing price, area or coordinates"
-            )
-
-        rooms = parse_rooms(raw.get("rooms_raw"))
-        floor, building_floors = parse_floor(raw.get("floor_raw"))
-        listed_month = parse_listed_month(raw.get("listed_date_raw"), self.today)
-
-        raw_id = raw.get("listing_id")
-        if not raw_id:
-            # deterministic fallback: last path segment of the advert URL
-            raw_id = str(raw.get("url") or "unknown").rstrip("/").rsplit("/", 1)[-1]
-
-        building_type_raw = raw.get("building_type_raw") or ""
-        building_type = "new" if "yeni" in _az_lower(str(building_type_raw)) else "old"
-
-        row = {
-            "listing_id": f"BINA-{raw_id}",
-            "source": "bina.az",
-            "lat": lat,
-            "lon": lon,
-            "price_azn": price,
-            "area_m2": area,
-            "price_azn_m2": round(price / area, 1),
-            # 0 = unknown, documented sentinel (schema requires int64).
-            "rooms": rooms if rooms is not None else 0,
-            "floor": floor if floor is not None else 0,
-            "building_floors": building_floors if building_floors is not None else 0,
-            "building_type": building_type,
-            # Unparseable dates fall back to the scrape month: listings on the
-            # live board without an explicit date were (re)posted recently.
-            "listed_month": listed_month or f"{self.today:%Y-%m}",
-            "title": raw.get("title") or "",
-            "description": raw.get("description") or "",
-            "image_phash": "",  # PhashPipeline fills this in when photo bytes exist
-            "district": raw.get("district") or "",
-        }
-        # Keep column order identical to the canonical schema.
-        return {col: row[col] for col in LISTING_COLUMNS}
-
-
-class PhashPipeline:
-    """Fill ``image_phash`` from attached cover-photo bytes, if any.
-
-    Runs after :class:`NormalizePipeline` (see ``ITEM_PIPELINES`` ordering).
-    A crawl that also fetched the cover photo attaches its bytes under the
-    transient key ``image_bytes``; the key is always popped so the final row
-    matches the canonical schema exactly. Offline (no bytes), the hash stays
-    ``""``.
-    """
-
-    def process_item(self, item, spider=None):
-        if isinstance(item, dict):
-            blob = item.pop("image_bytes", None)
-            if blob:
-                item["image_phash"] = phash_hex(blob)
-            else:
-                item.setdefault("image_phash", "")
-        return item
+    row = {
+        "listing_id": f"BINA-{raw_id}",
+        "source": "bina.az",
+        "lat": float(lat),
+        "lon": float(lon),
+        "price_azn": float(price),
+        "area_m2": float(area),
+        "price_azn_m2": round(float(price) / float(area), 1),
+        "rooms": int(rooms) if rooms is not None else 0,
+        "floor": int(floor) if floor is not None else 0,
+        "building_floors": int(floors) if floors is not None else 0,
+        "building_type": building_type,
+        "listed_month": listed_month,
+        "title": "",
+        "description": "",
+        "image_phash": "",
+        "photo_urls": json.dumps(node.get("photos") or []),
+        "district": node.get("location_name") or "",
+    }
+    return {col: row[col] for col in LISTING_COLUMNS}

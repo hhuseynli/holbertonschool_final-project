@@ -1,13 +1,10 @@
-"""Tests for `bakuml.viz` — the streamlit-free half of the demo app.
+"""Tests for `bakuml.viz` — the framework-free half of the app.
 
 The fixtures build a miniature but structurally faithful artifact set
 (3 real H3 cells, 4 panel months, 2 scenarios x 2 horizons of predictions,
-plus small JSON artifacts) in a temp directory. No network, no synthetic
-listings generation needed: viz consumes pipeline *outputs*, so the tests
-plant known outputs and assert exact pass-through.
-
-`app/streamlit_app.py` is deliberately never imported (importing it would
-execute streamlit calls); instead the test asserts the file *compiles*.
+plus small JSON artifacts) in a temp directory. No network needed: viz
+consumes pipeline *outputs*, so the tests plant known outputs and assert
+exact pass-through.
 """
 
 from __future__ import annotations
@@ -262,18 +259,17 @@ def test_cell_forecast_rows_and_order(predictions):
 # ---------------------------------------------------------------------------
 
 
-def test_streamlit_app_compiles_without_import():
-    """The UI shell must be syntactically valid; importing it would execute
-    streamlit calls, so only compile it."""
-    app_path = config.REPO_ROOT / "app" / "streamlit_app.py"
+def test_flask_app_compiles():
+    """The Flask app module must be syntactically valid."""
+    app_path = config.REPO_ROOT / "app" / "flask_app.py"
     assert app_path.is_file()
     compile(app_path.read_text(), str(app_path), "exec")
 
 
-def test_viz_module_is_streamlit_free():
-    """The contract: bakuml.viz stays importable/testable without streamlit."""
+def test_viz_module_is_framework_free():
+    """The contract: bakuml.viz stays importable/testable without flask/streamlit."""
     import pathlib
     import re
 
     source = pathlib.Path(viz.__file__).read_text()
-    assert not re.search(r"^\s*(import|from)\s+streamlit", source, re.MULTILINE)
+    assert not re.search(r"^\s*(import|from)\s+(streamlit|flask)", source, re.MULTILINE)

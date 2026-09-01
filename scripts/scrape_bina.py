@@ -1,12 +1,8 @@
 #!/usr/bin/env python3
-"""Live bina.az scrape (requires network; respects robots.txt + autothrottle).
-
-Set the PROXY_LIST environment variable (comma-separated http proxies) to
-enable proxy rotation. Cloudflare challenges are retried with rotating
-user agents; heavy challenges may still require a residential proxy pool.
-"""
+"""Fetch bina.az listings via GraphQL and write to parquet."""
 
 import argparse
+import logging
 
 from bakuml import config
 from bakuml.data.scraping.runner import scrape_to_parquet
@@ -14,10 +10,12 @@ from bakuml.data.scraping.runner import scrape_to_parquet
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--max-pages", type=int, default=5)
-    ap.add_argument("--out", default=str(config.RAW_DIR / "bina_listings.parquet"))
+    ap.add_argument("--max-pages", type=int, default=2400,
+                    help="Max pages to fetch (25 listings/page, 2400 = ~55K)")
+    ap.add_argument("--out", default=str(config.ARTIFACTS_DIR / "bina_full.parquet"))
     args = ap.parse_args()
 
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     config.ensure_dirs()
     out = scrape_to_parquet(args.out, max_pages=args.max_pages)
     print(f"scraped listings -> {out}")

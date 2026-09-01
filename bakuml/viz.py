@@ -1,11 +1,11 @@
-"""Pure visualization helpers for the Streamlit demo (no streamlit import).
+"""Pure visualization helpers for the Flask app (no web-framework import).
 
 This module is the testable half of the presentation layer: it turns pipeline
 artifacts (``schema.ARTIFACT_FILES``) into map-ready GeoJSON + colormaps and
 into tidy per-cell frames for the history / forecast charts. Keeping it free
-of any ``streamlit`` import means every piece of the app's data plumbing can
-be unit-tested headlessly with plain pytest, while ``app/streamlit_app.py``
-stays a thin, declarative UI shell.
+of any web-framework import means every piece of the app's data plumbing can
+be unit-tested headlessly with plain pytest, while ``app/flask_app.py``
+stays a thin UI shell.
 
 Design choices worth defending
 ------------------------------

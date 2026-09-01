@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Map{% endblock %}
+
+{% block content %}
+<div class="map-page">
+    <aside class="map-sidebar">
+        <div class="filter-title">Map Controls</div>
+
+        <div class="filter-group">
+            <label class="filter-label">Scenario</label>
+            <select id="map-scenario" class="filter-select">
+                {% for s in scenarios %}
+                <option value="{{ s }}">{{ s|capitalize }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="filter-group">
+            <label class="filter-label">Forecast horizon</label>
+            <select id="map-horizon" class="filter-select">
+                <option value="12">12 months</option>
+                <option value="24">24 months</option>
+            </select>
+        </div>
+
+        <div class="filter-group">
+            <label class="filter-label">Metric</label>
+            <select id="map-metric" class="filter-select">
+                {% for key, label in metrics.items() %}
+                <option value="{{ key }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <button id="map-update" class="filter-btn">Update map</button>
+
+        <div id="map-legend" class="map-legend" style="display:none">
+            <div id="legend-gradient" class="legend-gradient"></div>
+            <div class="legend-labels">
+                <span id="legend-min"></span>
+                <span id="legend-max"></span>
+            </div>
+            <div id="legend-caption" style="font-size:11px; color:var(--gray-500); margin-top:4px; text-align:center;"></div>
+        </div>
+
+        <div id="cell-popup" style="margin-top:16px; display:none;">
+            <div class="analytics-section-title">Selected Cell</div>
+            <div id="cell-popup-content"></div>
+        </div>
+    </aside>
+
+    <div class="map-container">
+        <div id="map"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/map.js') }}"></script>
+{% endblock %}

@@ -1,12 +1,10 @@
-"""Offline tests for the bina.az scraping package (DESIGN.md section 1).
+"""Offline tests for the bina.az scraping package.
 
 No network is touched anywhere: the parse helpers are pure functions, the
-middlewares are exercised with hand-built ``Request``/``HtmlResponse``
-objects, and the spider runs against ``tests/fixtures/bina_sample.html`` — a
-hand-authored, structurally plausible snapshot of bina.az markup containing
-listing cards (including deliberately broken ones), pagination and one
-embedded detail-page section. ``runner.scrape_to_parquet`` is never invoked
-(it starts a real crawl); only its import/signature is checked.
+GraphQL client's ``_flatten_node`` is tested with hand-built dicts, and
+``normalize_graphql_node`` is tested against the canonical schema.
+``runner.scrape_to_parquet`` is never invoked (it hits the network); only
+its import/signature is checked.
 """
 
 from __future__ import annotations
@@ -15,25 +13,14 @@ import datetime as dt
 import inspect
 import io
 import re
-from pathlib import Path
 
 import pytest
-from scrapy.exceptions import DropItem
-from scrapy.http import HtmlResponse, Request
-from scrapy.utils.test import get_crawler
 
 from bakuml.data.schema import LISTING_COLUMNS
-from bakuml.data.scraping import settings as scraping_settings
-from bakuml.data.scraping.items import ListingItem
-from bakuml.data.scraping.middlewares import (
-    USER_AGENTS,
-    CloudflareRetryMiddleware,
-    ProxyRotationMiddleware,
-    is_cloudflare_challenge,
-)
+from bakuml.data.scraping.client import _flatten_node
 from bakuml.data.scraping.pipelines import (
-    NormalizePipeline,
-    PhashPipeline,
+    AZ_MONTHS,
+    normalize_graphql_node,
     parse_area,
     parse_floor,
     parse_listed_month,
@@ -41,28 +28,8 @@ from bakuml.data.scraping.pipelines import (
     parse_rooms,
     phash_hex,
 )
-from bakuml.data.scraping.spiders.bina import BinaSpider, safe_css
 
-FIXTURE = Path(__file__).parent / "fixtures" / "bina_sample.html"
-LIST_URL = "https://bina.az/alqi-satqi/menziller"
-DETAIL_URL = "https://bina.az/items/4661288"
 TODAY = dt.date(2026, 8, 29)
-
-
-def fake_response(url=LIST_URL, body=None, status=200, headers=None):
-    """HtmlResponse tied to a Request so response.meta / follow() work."""
-    if body is None:
-        body = FIXTURE.read_bytes()
-    if isinstance(body, str):
-        body = body.encode("utf-8")
-    return HtmlResponse(
-        url=url,
-        body=body,
-        status=status,
-        headers=headers,
-        request=Request(url=url),
-        encoding="utf-8",
-    )
 
 
 # =========================================================================
@@ -74,9 +41,9 @@ class TestParsePrice:
         assert parse_price("150 000 AZN") == 150000.0
 
     def test_no_break_space_and_weird_whitespace(self):
-        assert parse_price("98 500 AZN") == 98500.0
+        assert parse_price("98\u00a0500 AZN") == 98500.0
         assert parse_price("  150 000   AZN ") == 150000.0
-        assert parse_price("1 250 000 AZN") == 1250000.0
+        assert parse_price("1 250 000 AZN") == 1250000.0
 
     def test_dot_as_thousands_separator(self):
         assert parse_price("150.000 AZN") == 150000.0
@@ -141,7 +108,6 @@ class TestParseListedMonth:
         assert parse_listed_month("Dekabr 2023", TODAY) == "2023-12"
 
     def test_dotted_capital_i_months(self):
-        # Azerbaijani İ: "İyun".lower() is NOT "iyun" without special casing.
         assert parse_listed_month("15 İyun 2025", TODAY) == "2025-06"
         assert parse_listed_month("3 İyul 2025", TODAY) == "2025-07"
 
@@ -188,362 +154,131 @@ class TestPhashHex:
 
 
 # =========================================================================
-# Middlewares
+# GraphQL client: _flatten_node
 # =========================================================================
 
-def _cf_response(request, status=403, body=b"<html>Just a moment...</html>",
-                 headers=None):
-    return HtmlResponse(
-        url=request.url, status=status, body=body, headers=headers,
-        request=request, encoding="utf-8",
-    )
+class TestFlattenNode:
+    def test_full_node(self):
+        node = {
+            "id": "6390275",
+            "path": "/items/6390275",
+            "rooms": 3,
+            "floor": 13,
+            "floors": 16,
+            "area": {"value": 161.0},
+            "price": {"total": 499000, "currency": "AZN"},
+            "location": {"id": "8", "name": "28 May", "latitude": 40.38, "longitude": 49.85},
+            "city": {"id": "1", "name": "Bakı"},
+            "photos": [{"thumbnail": "https://t.jpg", "large": "https://l.jpg"}],
+            "hasRepair": True,
+            "hasMortgage": False,
+            "isFeatured": False,
+            "updatedAt": "2026-09-01T14:11:17+04:00",
+        }
+        flat = _flatten_node(node)
+        assert flat["listing_id"] == "6390275"
+        assert flat["price"] == 499000
+        assert flat["area"] == 161.0
+        assert flat["lat"] == 40.38
+        assert flat["lon"] == 49.85
+        assert flat["location_name"] == "28 May"
+        assert flat["rooms"] == 3
+        assert flat["floor"] == 13
+        assert flat["floors"] == 16
+        assert flat["has_repair"] is True
+        assert flat["updated_at"] == "2026-09-01T14:11:17+04:00"
+        assert flat["photos"] == ["https://l.jpg"]
 
-
-class TestCloudflareDetection:
-    def test_403_with_body_marker(self):
-        req = Request(LIST_URL)
-        assert is_cloudflare_challenge(_cf_response(req, status=403))
-
-    def test_503_with_cf_mitigated_header(self):
-        req = Request(LIST_URL)
-        resp = _cf_response(
-            req, status=503, body=b"<html></html>",
-            headers={"cf-mitigated": "challenge"},
-        )
-        assert is_cloudflare_challenge(resp)
-
-    def test_403_from_cloudflare_edge(self):
-        req = Request(LIST_URL)
-        resp = _cf_response(
-            req, status=403, body=b"<html>error</html>",
-            headers={"Server": "cloudflare"},
-        )
-        assert is_cloudflare_challenge(resp)
-
-    def test_200_with_marker_is_not_a_challenge(self):
-        req = Request(LIST_URL)
-        assert not is_cloudflare_challenge(_cf_response(req, status=200))
-
-    def test_plain_403_is_not_a_challenge(self):
-        req = Request(LIST_URL)
-        resp = _cf_response(req, status=403, body=b"<html>forbidden</html>")
-        assert not is_cloudflare_challenge(resp)
-
-
-class TestCloudflareRetryMiddleware:
-    def _mw(self, **kwargs):
-        kwargs.setdefault("max_retries", 4)
-        kwargs.setdefault("backoff_base", 0.0)  # never sleep in tests
-        return CloudflareRetryMiddleware(**kwargs)
-
-    def test_retries_with_rotated_user_agent(self):
-        mw = self._mw()
-        spider = BinaSpider()
-        req = Request(LIST_URL, headers={"User-Agent": USER_AGENTS[0]})
-        out = mw.process_response(req, _cf_response(req), spider)
-        assert isinstance(out, Request)
-        assert out.meta["cf_retries"] == 1
-        assert out.dont_filter is True
-        ua1 = out.headers["User-Agent"].decode()
-        assert ua1 == USER_AGENTS[1] and ua1 != USER_AGENTS[0]
-
-        out2 = mw.process_response(out, _cf_response(out), spider)
-        assert out2.meta["cf_retries"] == 2
-        assert out2.headers["User-Agent"].decode() == USER_AGENTS[2]
-
-    def test_gives_up_after_max_retries(self):
-        mw = self._mw(max_retries=4)
-        spider = BinaSpider()
-        req = Request(LIST_URL, meta={"cf_retries": 4})
-        resp = _cf_response(req)
-        assert mw.process_response(req, resp, spider) is resp
-
-    def test_normal_response_passes_through(self):
-        mw = self._mw()
-        req = Request(LIST_URL)
-        resp = fake_response(body=b"<html>ok</html>")
-        assert mw.process_response(req, resp, BinaSpider()) is resp
-
-    def test_backoff_is_exponential(self):
-        mw = CloudflareRetryMiddleware(backoff_base=2.0)
-        delays = [mw.backoff_seconds(k) for k in range(4)]
-        assert delays == [2.0, 4.0, 8.0, 16.0]
-
-    def test_from_crawler_reads_settings(self):
-        crawler = get_crawler(settings_dict={
-            "CF_MAX_RETRIES": 2, "CF_BACKOFF_BASE_SECONDS": 0.5,
-        })
-        mw = CloudflareRetryMiddleware.from_crawler(crawler)
-        assert mw.max_retries == 2
-        assert mw.backoff_base == 0.5
-
-
-class TestProxyRotationMiddleware:
-    def test_empty_list_is_a_noop(self):
-        mw = ProxyRotationMiddleware([])
-        req = Request(LIST_URL)
-        assert mw.process_request(req, BinaSpider()) is None
-        assert "proxy" not in req.meta
-
-    def test_round_robin(self):
-        proxies = ["http://p1:8080", "http://p2:8080"]
-        mw = ProxyRotationMiddleware(proxies)
-        spider = BinaSpider()
-        seen = []
-        for _ in range(4):
-            req = Request(LIST_URL)
-            mw.process_request(req, spider)
-            seen.append(req.meta["proxy"])
-        assert seen == ["http://p1:8080", "http://p2:8080"] * 2
-
-    def test_existing_proxy_not_overwritten(self):
-        mw = ProxyRotationMiddleware(["http://p1:8080"])
-        req = Request(LIST_URL, meta={"proxy": "http://pinned:1"})
-        mw.process_request(req, BinaSpider())
-        assert req.meta["proxy"] == "http://pinned:1"
-
-    def test_from_crawler_reads_settings(self):
-        crawler = get_crawler(settings_dict={"PROXY_LIST": ["http://p9:1"]})
-        mw = ProxyRotationMiddleware.from_crawler(crawler)
-        assert mw.proxies == ["http://p9:1"]
+    def test_missing_nested_fields(self):
+        node = {"id": "1", "path": "/items/1"}
+        flat = _flatten_node(node)
+        assert flat["price"] is None
+        assert flat["area"] is None
+        assert flat["lat"] is None
+        assert flat["photos"] == []
 
 
 # =========================================================================
-# Spider: cards, pagination, detail page — all against the local fixture
+# Normalisation: GraphQL node -> canonical schema
 # =========================================================================
 
-class TestSafeCss:
-    def test_hit_miss_and_whitespace(self):
-        resp = fake_response(
-            body="<html><b>  x  </b><i>   </i></html>"
-        )
-        assert safe_css(resp, "b::text") == "x"
-        assert safe_css(resp, "i::text") is None        # whitespace-only
-        assert safe_css(resp, ".missing::text") is None  # no match
-
-
-class TestBinaSpiderParse:
-    @pytest.fixture()
-    def results(self):
-        spider = BinaSpider(max_pages=3)
-        return spider, list(spider.parse(fake_response()))
-
-    def test_follows_only_cards_with_links(self, results):
-        spider, out = results
-        detail = [r for r in out if r.callback == spider.parse_detail]
-        # 4 cards in the fixture; the one without an <a> must be skipped
-        assert sorted(r.url for r in detail) == [
-            "https://bina.az/items/4661288",
-            "https://bina.az/items/4661302",
-            "https://bina.az/items/4661417",
-        ]
-
-    def test_card_fields_travel_via_cb_kwargs(self, results):
-        spider, out = results
-        detail = [r for r in out if r.callback == spider.parse_detail]
-        by_url = {r.url: r.cb_kwargs["card"] for r in detail}
-
-        card1 = by_url["https://bina.az/items/4661288"]
-        assert parse_price(card1["price_raw"]) == 150000.0
-        assert card1["rooms_raw"] == "3 otaqlı"
-        assert card1["area_raw"] == "85.5 m²"
-        assert card1["floor_raw"] == "4/9 mərtəbə"
-        assert card1["district"] == "Yasamal r."
-        assert parse_listed_month(card1["listed_date_raw"], TODAY) == "2026-08"
-
-        # nbsp-separated price on card 2
-        card2 = by_url["https://bina.az/items/4661302"]
-        assert parse_price(card2["price_raw"]) == 98500.0
-
-        # card 3 has no price block: the guard yields None, never raises
-        card3 = by_url["https://bina.az/items/4661417"]
-        assert card3["price_raw"] is None
-        assert card3["area_raw"] == "38 m²"
-        assert card3["floor_raw"] is None
-
-    def test_pagination_respects_max_pages(self, results):
-        spider, out = results
-        pages = [r for r in out if r.callback == spider.parse]
-        assert len(pages) == 1
-        assert pages[0].url == "https://bina.az/alqi-satqi/menziller?page=2"
-        assert pages[0].meta["page"] == 2
-
-        single = BinaSpider(max_pages=1)
-        out1 = list(single.parse(fake_response()))
-        assert [r for r in out1 if r.callback == single.parse] == []
-
-
-class TestBinaSpiderParseDetail:
-    @pytest.fixture()
-    def item(self):
-        spider = BinaSpider()
-        items = list(spider.parse_detail(fake_response(url=DETAIL_URL), card={}))
-        assert len(items) == 1
-        return items[0]
-
-    def test_identity_and_price(self, item):
-        assert isinstance(item, ListingItem)
-        assert item["url"] == DETAIL_URL
-        assert item["listing_id"] == "4661288"
-        assert item["price_raw"] == "150 000 AZN"
-
-    def test_properties_table(self, item):
-        assert item["area_raw"] == "85.5 m²"
-        assert item["rooms_raw"] == "3"
-        assert item["floor_raw"] == "4/9"
-        assert item["building_type_raw"] == "Yeni tikili"
-
-    def test_geo_text_and_photos(self, item):
-        assert item["lat"] == "40.3892"
-        assert item["lon"] == "49.8156"
-        assert item["district"] == "Yasamal r."
-        assert item["title"].startswith("3 otaqlı")
-        assert "mənzil satılır" in item["description"]
-        assert item["listed_date_raw"] == "Yerləşdirilib: 28 Avqust 2026"
-        assert len(item["image_urls"]) == 2
-
-    def test_card_values_fill_detail_gaps(self):
-        spider = BinaSpider()
-        bare = fake_response(url="https://bina.az/items/999",
-                             body=b"<html><body>empty</body></html>")
-        card = {"price_raw": "75 000 AZN", "area_raw": "55 m²",
-                "district": "Binəqədi r.", "rooms_raw": "2 otaqlı",
-                "floor_raw": None, "listed_date_raw": "dünən"}
-        item = next(iter(spider.parse_detail(bare, card=card)))
-        assert item["price_raw"] == "75 000 AZN"
-        assert item["area_raw"] == "55 m²"
-        assert item["district"] == "Binəqədi r."
-        assert item["listed_date_raw"] == "dünən"
-        assert item["listing_id"] == "999"
-
-
-# =========================================================================
-# Pipelines: normalisation to the canonical schema
-# =========================================================================
-
-def _minimal_item(**overrides) -> ListingItem:
+def _minimal_node(**overrides) -> dict:
     base = {
-        "listing_id": "1",
-        "url": "https://bina.az/items/1",
-        "price_raw": "100 000 AZN",
-        "area_raw": "50 m²",
-        "lat": "40.40",
-        "lon": "49.80",
-        "listed_date_raw": "bugün",
+        "listing_id": "12345",
+        "path": "/items/12345",
+        "price": 100000,
+        "currency": "AZN",
+        "area": 50.0,
+        "lat": 40.40,
+        "lon": 49.80,
+        "rooms": 3,
+        "floor": 4,
+        "floors": 9,
+        "has_repair": True,
+        "location_name": "Yasamal",
+        "updated_at": "2026-08-29T10:00:00+04:00",
+        "photos": ["https://example.com/photo1.jpg", "https://example.com/photo2.jpg"],
     }
     base.update(overrides)
-    item = ListingItem()
-    for key, value in base.items():
-        if value is not None:
-            item[key] = value
-    return item
+    return base
 
 
-class TestNormalizePipeline:
-    def test_full_roundtrip_from_fixture(self):
-        spider = BinaSpider()
-        raw = next(iter(spider.parse_detail(fake_response(url=DETAIL_URL), card={})))
-        row = NormalizePipeline(today=TODAY).process_item(raw, spider)
-        row = PhashPipeline().process_item(row, spider)
-
+class TestNormalizeGraphqlNode:
+    def test_full_normalisation(self):
+        row = normalize_graphql_node(_minimal_node(), today=TODAY)
+        assert row is not None
         assert list(row) == list(LISTING_COLUMNS)
-        assert row["listing_id"] == "BINA-4661288"
+        assert row["listing_id"] == "BINA-12345"
         assert row["source"] == "bina.az"
-        assert row["price_azn"] == 150000.0
-        assert row["area_m2"] == 85.5
-        assert row["price_azn_m2"] == pytest.approx(150000.0 / 85.5, abs=0.05)
+        assert row["price_azn"] == 100000.0
+        assert row["area_m2"] == 50.0
+        assert row["price_azn_m2"] == pytest.approx(2000.0, abs=0.05)
         assert row["rooms"] == 3
-        assert (row["floor"], row["building_floors"]) == (4, 9)
+        assert row["floor"] == 4
+        assert row["building_floors"] == 9
         assert row["building_type"] == "new"
-        assert row["lat"] == pytest.approx(40.3892)
-        assert row["lon"] == pytest.approx(49.8156)
+        assert row["lat"] == pytest.approx(40.40)
+        assert row["lon"] == pytest.approx(49.80)
         assert row["listed_month"] == "2026-08"
-        assert row["image_phash"] == ""  # offline: no photo bytes
-        assert row["district"] == "Yasamal r."
+        assert row["district"] == "Yasamal"
+        assert row["image_phash"] == ""
 
     def test_drops_when_critical_fields_missing(self):
-        pipeline = NormalizePipeline(today=TODAY)
-        for overrides in (
-            {"price_raw": None},
-            {"price_raw": "Qiymət yoxdur"},
-            {"area_raw": None},
-            {"lat": None},
-            {"lon": "not-a-number"},
-        ):
-            with pytest.raises(DropItem):
-                pipeline.process_item(_minimal_item(**overrides))
+        assert normalize_graphql_node(_minimal_node(price=None), today=TODAY) is None
+        assert normalize_graphql_node(_minimal_node(price=0), today=TODAY) is None
+        assert normalize_graphql_node(_minimal_node(area=None), today=TODAY) is None
+        assert normalize_graphql_node(_minimal_node(lat=None), today=TODAY) is None
+        assert normalize_graphql_node(_minimal_node(lon=None), today=TODAY) is None
 
     def test_sentinels_for_optional_fields(self):
-        row = NormalizePipeline(today=TODAY).process_item(_minimal_item())
+        row = normalize_graphql_node(
+            _minimal_node(rooms=None, floor=None, floors=None, location_name=None),
+            today=TODAY,
+        )
         assert row["rooms"] == 0
         assert row["floor"] == 0
         assert row["building_floors"] == 0
-        assert row["building_type"] == "old"
-        assert row["title"] == ""
-        assert row["description"] == ""
         assert row["district"] == ""
-        assert row["listed_month"] == "2026-08"  # "bugün" vs injected today
 
-    def test_unparseable_date_falls_back_to_scrape_month(self):
-        row = NormalizePipeline(today=TODAY).process_item(
-            _minimal_item(listed_date_raw=None)
-        )
+    def test_no_repair_maps_to_old(self):
+        row = normalize_graphql_node(_minimal_node(has_repair=False), today=TODAY)
+        assert row["building_type"] == "old"
+
+    def test_missing_updated_at_uses_today(self):
+        row = normalize_graphql_node(_minimal_node(updated_at=None), today=TODAY)
         assert row["listed_month"] == "2026-08"
 
-    def test_building_type_mapping(self):
-        pipeline = NormalizePipeline(today=TODAY)
-        new = pipeline.process_item(_minimal_item(building_type_raw="Yeni tikili"))
-        old = pipeline.process_item(_minimal_item(building_type_raw="Köhnə tikili"))
-        assert new["building_type"] == "new"
-        assert old["building_type"] == "old"
-
-
-class TestPhashPipeline:
-    def test_fills_hash_from_attached_bytes(self):
-        from PIL import Image
-
-        img = Image.new("RGB", (16, 16), (200, 30, 90))
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        row = {"image_phash": "", "image_bytes": buf.getvalue()}
-        out = PhashPipeline().process_item(row)
-        assert re.fullmatch(r"[0-9a-f]{16}", out["image_phash"])
-        assert "image_bytes" not in out  # transient key removed
-
-    def test_offline_degrades_to_empty_hash(self):
-        out = PhashPipeline().process_item({"image_phash": ""})
-        assert out["image_phash"] == ""
-
-    def test_bad_bytes_degrade_to_empty_hash(self):
-        row = {"image_phash": "", "image_bytes": b"junk"}
-        assert PhashPipeline().process_item(row)["image_phash"] == ""
+    def test_id_from_path_fallback(self):
+        row = normalize_graphql_node(
+            _minimal_node(listing_id=None, path="/items/99999"),
+            today=TODAY,
+        )
+        assert row["listing_id"] == "BINA-99999"
 
 
 # =========================================================================
-# Settings contract + runner surface (never actually crawled)
+# Runner surface (never actually fetched)
 # =========================================================================
-
-class TestSettingsContract:
-    def test_politeness(self):
-        assert scraping_settings.ROBOTSTXT_OBEY is True
-        assert scraping_settings.AUTOTHROTTLE_ENABLED is True
-        assert scraping_settings.CONCURRENT_REQUESTS == 2
-        assert scraping_settings.DOWNLOAD_DELAY >= 1.0
-
-    def test_middlewares_and_pipelines_registered(self):
-        mws = scraping_settings.DOWNLOADER_MIDDLEWARES
-        assert "bakuml.data.scraping.middlewares.CloudflareRetryMiddleware" in mws
-        assert "bakuml.data.scraping.middlewares.ProxyRotationMiddleware" in mws
-        pipes = scraping_settings.ITEM_PIPELINES
-        norm = "bakuml.data.scraping.pipelines.NormalizePipeline"
-        ph = "bakuml.data.scraping.pipelines.PhashPipeline"
-        assert pipes[norm] < pipes[ph]  # normalise first, then hash
-
-    def test_cf_and_proxy_defaults(self):
-        assert scraping_settings.CF_MAX_RETRIES == 4
-        assert scraping_settings.PROXY_LIST == []
-        assert 503 not in scraping_settings.RETRY_HTTP_CODES
-
 
 def test_runner_signature_only():
     from bakuml.data.scraping.runner import scrape_to_parquet

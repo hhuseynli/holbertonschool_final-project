@@ -15,15 +15,13 @@ shap>=0.44
 h3>=4.0
 shapely>=2.0
 
-# Visualisation / demo app
+# Visualisation / web app
+flask>=3.0
 folium>=0.15
 branca>=0.7
 plotly>=5.18
-streamlit>=1.30
-streamlit-folium>=0.18
 
-# Scraping pipeline (offline-optional)
-scrapy>=2.11
+# Scraping (GraphQL client) + image hashing
 requests>=2.31
 Pillow>=10.0
 imagehash>=4.3
