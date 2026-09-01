@@ -24,7 +24,7 @@ test:
 	python -m pytest tests/ -q
 
 app:
-	streamlit run app/streamlit_app.py
+	flask --app app.flask_app run --port 5050 --debug
 
 clean:
 	rm -rf artifacts data/processed .pytest_cache

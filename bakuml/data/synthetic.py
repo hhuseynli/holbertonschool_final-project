@@ -206,6 +206,7 @@ def generate_listings(
             "building_type": building_type,
             "listed_month": month_str,
             "image_phash": phash,
+            "photo_urls": "[]",
             "district": district,
         }
     )

@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Buy{% endblock %}
+
+{% block content %}
+<div class="listing-page">
+    <!-- Filter sidebar -->
+    <aside class="filter-sidebar">
+        <div class="filter-title">Filters</div>
+
+        <div class="filter-group">
+            <label class="filter-label">District</label>
+            <select id="filter-district" class="filter-select">
+                <option value="">All districts</option>
+                {% for d in districts %}
+                <option value="{{ d }}">{{ d }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="filter-group">
+            <label class="filter-label">Rooms</label>
+            <select id="filter-rooms" class="filter-select">
+                <option value="">Any</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5+</option>
+            </select>
+        </div>
+
+        <div class="filter-group">
+            <label class="filter-label">Price (AZN)</label>
+            <div class="filter-row">
+                <input type="number" id="filter-price-min" class="filter-input" placeholder="Min" min="0">
+                <input type="number" id="filter-price-max" class="filter-input" placeholder="Max">
+            </div>
+        </div>
+
+        <div class="filter-group">
+            <label class="filter-label">Area (m&sup2;)</label>
+            <div class="filter-row">
+                <input type="number" id="filter-area-min" class="filter-input" placeholder="Min" min="0">
+                <input type="number" id="filter-area-max" class="filter-input" placeholder="Max">
+            </div>
+        </div>
+
+        <div class="filter-group">
+            <label class="filter-label">Building type</label>
+            <select id="filter-building" class="filter-select">
+                <option value="">Any</option>
+                <option value="new">New build</option>
+                <option value="old">Old build</option>
+            </select>
+        </div>
+
+        <button id="apply-filters" class="filter-btn">Apply filters</button>
+    </aside>
+
+    <!-- Main listing area -->
+    <div class="listing-main">
+        <div class="sort-bar">
+            <span class="results-count" id="results-count">{{ total }} listings</span>
+            <select id="sort-select" class="sort-select">
+                <option value="score_desc">Investment score</option>
+                <option value="newest">Newest</option>
+                <option value="price_asc">Price: low to high</option>
+                <option value="price_desc">Price: high to low</option>
+                <option value="price_m2_asc">Price/m&sup2;: low to high</option>
+                <option value="price_m2_desc">Price/m&sup2;: high to low</option>
+                <option value="area_desc">Largest first</option>
+            </select>
+        </div>
+
+        <div id="card-grid" class="card-grid">
+            <div class="loading"><div class="spinner"></div>Loading listings...</div>
+        </div>
+
+        <div id="pagination" class="pagination"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/listings.js') }}"></script>
+{% endblock %}

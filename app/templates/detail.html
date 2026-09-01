@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+{% block title %}{{ listing.district or 'Listing' }} — {{ listing.rooms }} rooms{% endblock %}
+
+{% block content %}
+<a href="/" class="back-link">&larr; Back to listings</a>
+
+<div class="detail-page">
+    <!-- Main content -->
+    <div class="detail-main">
+        {% if listing.photos and listing.photos|length > 0 %}
+        <div class="gallery-wrapper">
+            <div class="detail-gallery">
+                <img id="gallery-main" src="{{ listing.photos[0] }}" alt="Listing photo" onerror="this.parentElement.innerHTML='No photo available'">
+                {% if listing.photos|length > 1 %}
+                <button class="gallery-btn gallery-prev" onclick="galleryNav(-1)">&lsaquo;</button>
+                <button class="gallery-btn gallery-next" onclick="galleryNav(1)">&rsaquo;</button>
+                <div class="gallery-counter"><span id="gallery-idx">1</span> / {{ listing.photos|length }}</div>
+                {% endif %}
+            </div>
+            {% if listing.photos|length > 1 %}
+            <div class="gallery-thumbs">
+                {% for photo in listing.photos %}
+                <img src="{{ photo }}" alt="" class="gallery-thumb {% if loop.index0 == 0 %}active{% endif %}"
+                     onclick="galleryGo({{ loop.index0 }})" onerror="this.style.display='none'">
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        {% else %}
+        <div class="detail-gallery">No photo available</div>
+        {% endif %}
+
+        <div class="detail-info">
+            <div class="detail-price">{{ "{:,.0f}".format(listing.price_azn) }} AZN</div>
+            <div class="detail-price-m2">{{ "{:,.0f}".format(listing.price_azn_m2) }} AZN/m&sup2;</div>
+
+            <div class="detail-specs-grid">
+                <div class="spec-item">
+                    <div class="spec-label">Rooms</div>
+                    <div class="spec-value">{{ listing.rooms or '—' }}</div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-label">Area</div>
+                    <div class="spec-value">{{ listing.area_m2 }} m&sup2;</div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-label">Floor</div>
+                    <div class="spec-value">{{ listing.floor or '—' }}{% if listing.building_floors %}/{{ listing.building_floors }}{% endif %}</div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-label">Building</div>
+                    <div class="spec-value">{{ 'New' if listing.building_type == 'new' else 'Old' }}</div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-label">District</div>
+                    <div class="spec-value">{{ listing.district or '—' }}</div>
+                </div>
+                <div class="spec-item">
+                    <div class="spec-label">Listed</div>
+                    <div class="spec-value">{{ listing.listed_month or '—' }}</div>
+                </div>
+            </div>
+
+            {% if listing.lat and listing.lon %}
+            <div id="detail-map" class="detail-map-mini"></div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Analytics sidebar -->
+    <div class="detail-sidebar">
+        {% set a = listing.analytics %}
+        {% if a %}
+        <div class="analytics-panel">
+            <div class="analytics-header">Investment Analytics</div>
+            <div class="analytics-body">
+
+                <!-- Investment Score -->
+                <div class="score-dial">
+                    <div class="score-number" style="color: {{ '#27ae60' if a.investment_score >= 65 else '#f39c12' if a.investment_score >= 40 else '#e74c3c' }}">
+                        {{ a.investment_score }}
+                    </div>
+                    <div class="score-label">Investment Score</div>
+                </div>
+
+                <!-- Price Position -->
+                {% if a.q10 and a.q90 and a.q10 != a.q90 %}
+                <div class="analytics-section">
+                    <div class="analytics-section-title">Price Position</div>
+                    <div class="price-bar">
+                        <div class="price-bar-fill" style="width: 100%"></div>
+                        <div class="price-bar-marker" style="left: {{ a.price_percentile }}%"></div>
+                    </div>
+                    <div class="price-bar-labels">
+                        <span>{{ "{:,.0f}".format(a.q10) }}</span>
+                        <span>{{ "{:,.0f}".format(a.q50) }} AZN/m&sup2;</span>
+                        <span>{{ "{:,.0f}".format(a.q90) }}</span>
+                    </div>
+                    <div style="text-align:center; margin-top:8px; font-size:13px;">
+                        {% if a.price_position == 'underpriced' %}
+                            <span style="color: #27ae60; font-weight:600">Underpriced</span> vs neighborhood
+                        {% elif a.price_position == 'overpriced' %}
+                            <span style="color: #e74c3c; font-weight:600">Overpriced</span> vs neighborhood
+                        {% elif a.price_position == 'below average' %}
+                            <span style="color: #27ae60;">Below average</span> for area
+                        {% elif a.price_position == 'above average' %}
+                            <span style="color: #f39c12;">Above average</span> for area
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Appreciation Forecast -->
+                <div class="analytics-section">
+                    <div class="analytics-section-title">Forecast Appreciation</div>
+                    <div class="analytics-row">
+                        <span class="analytics-row-label">12 months</span>
+                        <span class="analytics-row-value" style="color: {{ '#27ae60' if a.appreciation_12m_pct and a.appreciation_12m_pct > 0 else '#e74c3c' }}">
+                            {% if a.appreciation_12m_pct is not none %}{{ '%+.1f'|format(a.appreciation_12m_pct) }}%{% else %}—{% endif %}
+                        </span>
+                    </div>
+                    <div class="analytics-row">
+                        <span class="analytics-row-label">24 months</span>
+                        <span class="analytics-row-value" style="color: {{ '#27ae60' if a.appreciation_24m_pct and a.appreciation_24m_pct > 0 else '#e74c3c' }}">
+                            {% if a.appreciation_24m_pct is not none %}{{ '%+.1f'|format(a.appreciation_24m_pct) }}%{% else %}—{% endif %}
+                        </span>
+                    </div>
+                    {% if a.hotspot_prob is not none %}
+                    <div class="analytics-row">
+                        <span class="analytics-row-label">Hotspot probability</span>
+                        <span class="analytics-row-value">{{ '%.0f'|format(a.hotspot_prob * 100) }}%</span>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Location Intelligence -->
+                <div class="analytics-section">
+                    <div class="analytics-section-title">Location Intelligence</div>
+                    <div class="analytics-row">
+                        <span class="analytics-row-label">Metro distance</span>
+                        <span class="analytics-row-value">{% if a.dist_metro_km is not none %}{{ a.dist_metro_km }} km{% else %}—{% endif %}</span>
+                    </div>
+                    <div class="analytics-row">
+                        <span class="analytics-row-label">City centre</span>
+                        <span class="analytics-row-value">{% if a.dist_centre_km is not none %}{{ a.dist_centre_km }} km{% else %}—{% endif %}</span>
+                    </div>
+                    <div class="analytics-row">
+                        <span class="analytics-row-label">Master Plan score</span>
+                        <span class="analytics-row-value">{% if a.node_gravity is not none %}{{ '%.2f'|format(a.node_gravity) }}{% else %}—{% endif %}</span>
+                    </div>
+                    {% if a.in_redev_zone %}
+                    <div class="analytics-row">
+                        <span class="analytics-row-label">Redevelopment zone</span>
+                        <span class="analytics-row-value" style="color: #f39c12">Yes</span>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Neighbourhood Trend -->
+                <div class="analytics-section">
+                    <div class="analytics-section-title">Neighbourhood Trend</div>
+                    <div class="analytics-row">
+                        <span class="analytics-row-label">3-month momentum</span>
+                        <span class="analytics-row-value" style="color: {{ '#27ae60' if a.momentum_3m_pct > 0 else '#e74c3c' if a.momentum_3m_pct < 0 else 'inherit' }}">
+                            {{ '%+.1f'|format(a.momentum_3m_pct) }}%
+                        </span>
+                    </div>
+                    {% if a.current_cell_price %}
+                    <div class="analytics-row">
+                        <span class="analytics-row-label">Cell median price</span>
+                        <span class="analytics-row-value">{{ "{:,.0f}".format(a.current_cell_price) }} AZN/m&sup2;</span>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <!-- Cell forecast chart -->
+                <div class="analytics-section">
+                    <div class="analytics-section-title">Cell Price History</div>
+                    <div id="cell-chart" style="height: 200px;"></div>
+                </div>
+            </div>
+        </div>
+        {% else %}
+        <div class="analytics-panel">
+            <div class="analytics-header">Investment Analytics</div>
+            <div class="analytics-body">
+                <div class="empty-state">
+                    <p>No analytics available for this location. Run <code>make demo</code> to generate ML artifacts.</p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Photo gallery
+{% if listing.photos and listing.photos|length > 1 %}
+const galleryPhotos = {{ listing.photos | tojson }};
+let galleryIndex = 0;
+
+function galleryGo(idx) {
+    galleryIndex = Math.max(0, Math.min(idx, galleryPhotos.length - 1));
+    document.getElementById('gallery-main').src = galleryPhotos[galleryIndex];
+    document.getElementById('gallery-idx').textContent = galleryIndex + 1;
+    document.querySelectorAll('.gallery-thumb').forEach((el, i) => {
+        el.classList.toggle('active', i === galleryIndex);
+    });
+}
+
+function galleryNav(dir) {
+    galleryGo(galleryIndex + dir);
+}
+
+// Keyboard navigation
+document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft') galleryNav(-1);
+    if (e.key === 'ArrowRight') galleryNav(1);
+});
+{% endif %}
+
+{% if listing.lat and listing.lon %}
+// Mini map
+const map = L.map('detail-map').setView([{{ listing.lat }}, {{ listing.lon }}], 15);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OSM'
+}).addTo(map);
+L.marker([{{ listing.lat }}, {{ listing.lon }}]).addTo(map);
+{% endif %}
+
+{% if listing.analytics and listing.analytics.h3_cell %}
+// Fetch cell history for chart
+fetch('/api/cell/{{ listing.analytics.h3_cell }}?scenario=baseline')
+    .then(r => r.json())
+    .then(data => {
+        if (data.history && data.history.length > 0) {
+            const months = data.history.map(h => h.month);
+            const prices = data.history.map(h => h.price_azn_m2_median);
+
+            const traces = [{
+                x: months, y: prices,
+                type: 'scatter', mode: 'lines+markers',
+                line: { color: '#1a3a5c', width: 2 },
+                marker: { size: 4 },
+                name: 'Median price'
+            }];
+
+            // Add forecast if available
+            if (data.forecast && data.forecast.length > 0) {
+                const lastMonth = months[months.length - 1];
+                const lastPrice = prices[prices.length - 1];
+                const fcMonths = data.forecast.map(f => {
+                    const d = new Date(lastMonth + '-01');
+                    d.setMonth(d.getMonth() + f.horizon_months);
+                    return d.toISOString().slice(0, 7);
+                });
+
+                traces.push({
+                    x: [lastMonth, ...fcMonths],
+                    y: [lastPrice, ...data.forecast.map(f => f.q50)],
+                    type: 'scatter', mode: 'lines',
+                    line: { color: '#2980b9', width: 2, dash: 'dash' },
+                    name: 'Forecast (q50)'
+                });
+                traces.push({
+                    x: [lastMonth, ...fcMonths, ...fcMonths.slice().reverse(), lastMonth],
+                    y: [lastPrice, ...data.forecast.map(f => f.q90), ...data.forecast.map(f => f.q10).reverse(), lastPrice],
+                    fill: 'toself', fillcolor: 'rgba(41,128,185,0.1)',
+                    line: { width: 0 }, showlegend: false,
+                    name: 'q10-q90 band'
+                });
+            }
+
+            Plotly.newPlot('cell-chart', traces, {
+                margin: { t: 10, r: 10, b: 30, l: 50 },
+                xaxis: { tickangle: -45, tickfont: { size: 10 } },
+                yaxis: { title: { text: 'AZN/m\u00B2', font: { size: 11 } }, tickfont: { size: 10 } },
+                showlegend: false,
+                paper_bgcolor: 'transparent', plot_bgcolor: 'transparent',
+            }, { responsive: true, displayModeBar: false });
+        }
+    });
+{% endif %}
+</script>
+{% endblock %}
