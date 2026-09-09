@@ -1,17 +1,19 @@
 """ML enrichment engine — maps each listing to pre-computed analytics.
 
-Each listing has (lat, lon) which maps to an H3 cell via ``h3.latlng_to_cell``.
-Pre-computed artifacts (predictions, panel, cell_features) are loaded once at
-startup and keyed by H3 cell for O(1) lookup.
+Each listing has (lat, lon) which maps to a spatial cell via the saved
+cell_geometry.geojson (point-in-polygon).  The cell ID format depends on the
+active tessellation (H3, KD-tree, market regions) — it is treated as opaque.
 """
 
 from __future__ import annotations
 
+import json as _json
 from pathlib import Path
 
-import h3
 import numpy as np
 import pandas as pd
+from shapely.geometry import Point, shape
+from shapely.strtree import STRtree
 
 from bakuml import config
 from bakuml.geo import haversine_km
@@ -23,7 +25,33 @@ class ListingEnricher:
 
     def __init__(self, artifacts_dir: Path = config.ARTIFACTS_DIR) -> None:
         self.arts = load_artifacts(artifacts_dir)
+        self._build_cell_index(artifacts_dir)
         self._build_lookups()
+
+    def _build_cell_index(self, artifacts_dir: Path) -> None:
+        """Build a spatial index from cell_geometry.geojson for point-in-polygon lookup."""
+        geojson_path = artifacts_dir / "cell_geometry.geojson"
+        self._cell_geoms: list[object] = []
+        self._cell_ids: list[str] = []
+        if geojson_path.is_file():
+            with open(geojson_path) as f:
+                geo = _json.load(f)
+            for feat in geo["features"]:
+                cell_id = feat["properties"]["h3"]
+                geom = shape(feat["geometry"])
+                self._cell_geoms.append(geom)
+                self._cell_ids.append(cell_id)
+            self._tree = STRtree(self._cell_geoms)
+        else:
+            self._tree = None
+
+    def _lookup_cell(self, lat: float, lon: float) -> str | None:
+        """Map a (lat, lon) to a cell ID using the spatial index."""
+        if self._tree is None:
+            return None
+        pt = Point(lon, lat)  # shapely uses (x=lon, y=lat)
+        idx = self._tree.nearest(pt)
+        return self._cell_ids[idx]
 
     def _build_lookups(self) -> None:
         predictions = self.arts.get("predictions")
@@ -100,7 +128,10 @@ class ListingEnricher:
             listing["analytics"] = None
             return listing
 
-        cell = h3.latlng_to_cell(float(lat), float(lon), config.H3_RESOLUTION)
+        cell = self._lookup_cell(float(lat), float(lon))
+        if cell is None:
+            listing["analytics"] = None
+            return listing
         price_m2 = listing.get("price_azn_m2") or 0
 
         # Prediction lookup (baseline, 12m)
