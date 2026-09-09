@@ -13,7 +13,7 @@ make install       # pip install -r requirements.txt && pip install -e .
 make test          # python -m pytest tests/ -q
 make demo          # fast end-to-end pipeline (~2-4 min), writes artifacts/
 make full          # full pipeline with STGCN forecaster
-make app           # streamlit run app/streamlit_app.py
+make app           # flask --app app.flask_app run --port 5050 --debug
 make maup          # compare units of analysis under leakage-proof protocols
 
 # Run a single test file
@@ -47,7 +47,7 @@ The pipeline flows through 10 stages orchestrated by `bakuml/pipeline.py`:
 
 **Scenario engine** (in `pipeline.py`): Three scenarios (baseline, polycentric, transit) adjust forecasts using *estimated* quantities from the panel's own history, never planted truth.
 
-**App** (`app/streamlit_app.py`): Folium map (zones when the `zones` artifact is present, else raw cells) with scenario/horizon/metric controls. Reads all artifacts from `artifacts/`, and takes cell polygons from `cell_geometry.geojson` because a fitted tessellation cannot be reconstructed outside the run that built it.
+**App** (`app/flask_app.py` + `app/enrichment.py`): Flask marketplace with ML-enriched listing cards, investment scores, and an interactive Folium map (zones when the `zones` artifact is present, else raw cells) with scenario/horizon/metric controls. `ListingEnricher` maps each listing to its spatial cell via point-in-polygon lookup against `cell_geometry.geojson`, then attaches appreciation forecasts, price-band positioning, and metro proximity scores. Reads all artifacts from `artifacts/`.
 
 ## Unit of analysis
 
@@ -77,4 +77,4 @@ All in `bakuml/config.py`: `TESSELLATION="kdtree"`, `H3_RESOLUTION=8`, `CITY_CEN
 
 ## Module contracts
 
-`DESIGN.md` is the binding contract between modules — every function signature listed there must be maintained. The pipeline and Streamlit app wire modules together purely through these interfaces.
+`DESIGN.md` is the binding contract between modules — every function signature listed there must be maintained. The pipeline and Flask app wire modules together purely through these interfaces.

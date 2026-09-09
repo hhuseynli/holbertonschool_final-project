@@ -29,7 +29,7 @@ days-on-market — the State Registry is closed.
 ```bash
 make install       # pip install -r requirements.txt && pip install -e .
 make demo          # end-to-end pipeline on the offline dataset (~2-4 min)
-make app           # interactive Streamlit + Folium map
+make app           # Flask marketplace + interactive Folium map
 make test          # full test suite
 make full          # full-size dataset + STGCN forecaster
 make maup          # compare units of analysis (H3 vs KD-tree vs market regions)
@@ -38,7 +38,7 @@ make maup          # compare units of analysis (H3 vs KD-tree vs market regions)
 `make demo` runs every stage — data → dedup → tessellation → cell panel → features →
 leakage-proof validation → SHAP → conformal intervals → STGCN forecast →
 Spatial DiD → artifacts — and drops the results into `artifacts/`, which the
-Streamlit app reads. Click any cell on the map to see its price history and
+Flask app reads. Click any cell on the map to see its price history and
 its 12/24-month forecast fan.
 
 ## Data ecosystem
@@ -211,7 +211,8 @@ bakuml/
 ├── validation/          # walk-forward + spatial blocked CV
 ├── viz.py               # pure helpers for the app
 └── pipeline.py          # end-to-end orchestration -> artifacts/
-app/streamlit_app.py     # interactive cell/zone map + drilldowns
+app/flask_app.py         # Flask marketplace with ML-enriched listings + map
+app/enrichment.py        # investment scoring & cell analytics engine
 scripts/                 # run_pipeline / make_dataset / scrape_bina
 tests/                   # offline, deterministic; recovery-based assertions
 DESIGN.md                # binding module contracts

@@ -292,9 +292,9 @@ list; they never call `bakuml.features` themselves.
     forecaster beats persistence MAE; rollout shapes/finiteness; keep torch
     epochs small so the file runs in < 90 s.
 
-## 8. `bakuml/viz.py` + `app/streamlit_app.py` — the demo
+## 8. `bakuml/viz.py` + `app/flask_app.py` + `app/enrichment.py` — the demo
 
-- `bakuml/viz.py` (pure, unit-testable, no streamlit import):
+- `bakuml/viz.py` (pure, unit-testable, no Flask import):
   - `load_artifacts(artifacts_dir=config.ARTIFACTS_DIR) -> dict` — reads every
     `ARTIFACT_FILES` entry that exists (parquet → DataFrame, json → dict);
     missing files simply absent from the dict.
@@ -306,12 +306,19 @@ list; they never call `bakuml.features` themselves.
   - `cell_history(panel, h3_id) -> pd.DataFrame[month, price_azn_m2_median,
     n_listings]`; `cell_forecast(predictions, h3_id, scenario)
     -> pd.DataFrame[horizon_months, q10, q50, q90]`.
-- `app/streamlit_app.py` — Folium map of the hex layer (+ metro stations,
-  polycentric nodes, redevelopment circles), sidebar controls (scenario,
-  horizon, metric), `st_folium` click → selected hexagon detail: history +
-  forecast fan chart (plotly), top SHAP drivers bar, tabs for DiD results
-  (event-study plot) and validation metrics. Graceful empty state pointing
-  at `make demo` when artifacts are missing.
+- `app/flask_app.py` — Flask marketplace serving listings as ML-enriched
+  cards. Routes: `/` (listings grid with filters), `/listing/<id>` (detail
+  page with analytics sidebar), `/map` (interactive Folium map with
+  scenario/horizon/metric controls), plus JSON APIs (`/api/listings`,
+  `/api/hexlayer`, `/api/cell/<h3_id>`, `/api/metro_stations`,
+  `/api/config`). Templates in `app/templates/`, static assets in
+  `app/static/`.
+- `app/enrichment.py` — `ListingEnricher` maps each listing's (lat, lon) to
+  a spatial cell via Shapely STRtree point-in-polygon lookup against
+  `cell_geometry.geojson`, then attaches: investment score (composite of
+  appreciation, price positioning, metro proximity, masterplan alignment,
+  momentum), price-band percentile, forecast summary, and metro distance.
+  Tessellation-agnostic — works with any cell geometry.
 
 ## 9. `bakuml/pipeline.py` + `scripts/` (integration — written last)
 
