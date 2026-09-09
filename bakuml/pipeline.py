@@ -12,7 +12,7 @@ Stages (each maps to a module documented in DESIGN.md):
 8.  forecast   - STGCN (or spatial-lag ridge) 12/24-month rollout,
                  scenario engine on top
 9.  causal     - Spatial DiD around the B-04 metro opening
-10. artifacts  - parquet/json files consumed by the Streamlit app
+10. artifacts  - parquet/json files consumed by the Flask app
 
 The scenario engine composes *estimated* quantities, never planted truth:
 the polycentric scenario scales the node-gravity appreciation slope

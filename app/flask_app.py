@@ -166,7 +166,8 @@ def create_app() -> Flask:
             return jsonify({"error": "artifacts not loaded"}), 500
 
         geojson, cmap = hex_layer_geojson(
-            predictions, panel, scenario=scenario, horizon=horizon, metric=metric
+            predictions, panel, scenario=scenario, horizon=horizon, metric=metric,
+            geometry=arts.get("cell_geometry"),
         )
         return jsonify({
             "geojson": geojson,

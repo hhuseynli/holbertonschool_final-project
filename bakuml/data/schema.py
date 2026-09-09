@@ -7,7 +7,7 @@ Three core tables flow through the project:
 2. PANEL - one row per (h3 cell, month) with aggregated prices and features.
    Produced by `bakuml.spatial.grid` + `bakuml.features.build`.
 3. PREDICTIONS - one row per (h3 cell, horizon) with conformal intervals.
-   Produced by `bakuml.models` and consumed by the Streamlit app.
+   Produced by `bakuml.models` and consumed by the Flask app.
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ PREDICTION_COLUMNS: dict[str, str] = {
     "hotspot_prob": "float64",       # P(appreciation above city median)
 }
 
-# Artifact filenames consumed by the Streamlit app (under config.ARTIFACTS_DIR)
+# Artifact filenames consumed by the Flask app (under config.ARTIFACTS_DIR)
 ARTIFACT_FILES = {
     "listings": "listings.parquet",
     "panel": "panel.parquet",
