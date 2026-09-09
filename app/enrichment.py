@@ -16,7 +16,6 @@ from shapely.geometry import Point, shape
 from shapely.strtree import STRtree
 
 from bakuml import config
-from bakuml.geo import haversine_km
 from bakuml.viz import load_artifacts
 
 

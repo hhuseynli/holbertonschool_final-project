@@ -5,7 +5,7 @@ Holberton School ML graduation project, Group 3.
 
 This document is the binding contract between modules. Every function listed
 here must exist with exactly this signature; the pipeline (`bakuml/pipeline.py`)
-and the Streamlit app wire modules together purely through these interfaces.
+and the Flask app wire modules together purely through these interfaces.
 
 ## Ground rules (all modules)
 
