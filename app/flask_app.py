@@ -217,14 +217,23 @@ def _load_listings(artifacts_dir: Path) -> pd.DataFrame:
 
     Looks for bina_full.parquet first (full scrape), then bina_scraped.parquet
     (smaller scrape). Falls back to listings.parquet only if no scraped data
-    exists. Synthetic data is never shown in the app.
+    exists.
     """
-    path = artifacts_dir / "listings.parquet"
-    if path.is_file():
-        df = pd.read_parquet(path)
-        if "photo_urls" not in df.columns:
-            df["photo_urls"] = "[]"
-        return df
+    import json as _json
+
+    for name in ("bina_full.parquet", "bina_scraped.parquet", "listings.parquet"):
+        path = artifacts_dir / name
+        if path.is_file():
+            df = pd.read_parquet(path)
+            # Normalise photo column: scraped data has photo_url (single URL),
+            # while the app expects photo_urls (JSON array of URLs).
+            if "photo_urls" not in df.columns and "photo_url" in df.columns:
+                df["photo_urls"] = df["photo_url"].apply(
+                    lambda u: _json.dumps([u]) if pd.notna(u) and u else "[]"
+                )
+            if "photo_urls" not in df.columns:
+                df["photo_urls"] = "[]"
+            return df
     return pd.DataFrame(columns=list(LISTING_COLUMNS))
 
 

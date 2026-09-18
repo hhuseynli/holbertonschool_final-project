@@ -64,14 +64,18 @@ class ListingEnricher:
                 key = (row["h3"], row["scenario"], int(row["horizon_months"]))
                 self._pred[key] = row.to_dict()
 
-        # Last observed price per cell
+        # Last observed price per cell + price distribution for positioning
         self._last_price: dict[str, float] = {}
         self._momentum: dict[str, float] = {}
+        self._cell_price_q10: dict[str, float] = {}
+        self._cell_price_q90: dict[str, float] = {}
         if panel is not None:
             sorted_panel = panel.sort_values("month", kind="stable")
             for cell, grp in sorted_panel.groupby("h3"):
                 self._last_price[cell] = float(grp["price_azn_m2_median"].iloc[-1])
                 prices = grp["price_azn_m2_median"].values
+                self._cell_price_q10[cell] = float(np.percentile(prices, 10))
+                self._cell_price_q90[cell] = float(np.percentile(prices, 90))
                 if len(prices) >= 4:
                     recent = prices[-3:].mean()
                     earlier = prices[-6:-3].mean() if len(prices) >= 7 else prices[:-3].mean()
@@ -141,17 +145,21 @@ class ListingEnricher:
         q50 = pred_12.get("q50")
         q90 = pred_12.get("q90")
 
-        # Price position
-        if q50 and price_m2 > 0:
-            if price_m2 < q10:
+        # Price position — compare listing price against the cell's observed
+        # price distribution (q10/q90 from the panel), not forecast quantiles.
+        cell_q10 = self._cell_price_q10.get(cell)
+        cell_q90 = self._cell_price_q90.get(cell)
+        cell_median = self._last_price.get(cell)
+        if cell_q10 is not None and cell_q90 is not None and price_m2 > 0:
+            if price_m2 < cell_q10:
                 price_position = "underpriced"
-            elif price_m2 > q90:
+            elif price_m2 > cell_q90:
                 price_position = "overpriced"
-            elif price_m2 < q50:
+            elif price_m2 < (cell_median or (cell_q10 + cell_q90) / 2):
                 price_position = "below average"
             else:
                 price_position = "above average"
-            price_percentile = float(np.clip((price_m2 - q10) / (q90 - q10) * 100, 0, 100)) if q90 != q10 else 50
+            price_percentile = float(np.clip((price_m2 - cell_q10) / (cell_q90 - cell_q10) * 100, 0, 100)) if cell_q90 != cell_q10 else 50
         else:
             price_position = "unknown"
             price_percentile = 50
@@ -179,9 +187,9 @@ class ListingEnricher:
             "appreciation_12m_pct": pred_12.get("appreciation_pct"),
             "appreciation_24m_pct": pred_24.get("appreciation_pct"),
             "hotspot_prob": pred_12.get("hotspot_prob"),
-            "q10": q10,
-            "q50": q50,
-            "q90": q90,
+            "q10": cell_q10,
+            "q50": cell_median,
+            "q90": cell_q90,
             "price_position": price_position,
             "price_percentile": round(price_percentile, 1),
             "current_cell_price": self._last_price.get(cell),
