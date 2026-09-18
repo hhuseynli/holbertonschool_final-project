@@ -35,15 +35,17 @@ from bakuml.geo import haversine_km, min_distance_km
 
 # (lat, lon, lat_std, lon_std, weight) - where listings concentrate
 _CLUSTERS = [
-    (40.3780, 49.8450, 0.020, 0.026, 0.42),   # Baku core
-    (40.4150, 49.8900, 0.030, 0.040, 0.20),   # inner suburbs / east
-    (40.4489, 49.7550, 0.016, 0.020, 0.09),   # Khirdalan / Absheron
-    (40.5897, 49.6686, 0.018, 0.022, 0.09),   # Sumgait
-    (40.4000, 50.0100, 0.025, 0.035, 0.08),   # Surakhani / Hovsan
-    (40.4050, 49.8100, 0.014, 0.016, 0.12),   # Yasamal / purple-line corridor
+    (40.3780, 49.8450, 0.018, 0.024, 0.30),   # Baku core (28 May / Sahil / Nasimi)
+    (40.3950, 49.9300, 0.025, 0.035, 0.22),   # inner east (Khatai / Ahmadli / Gunashli)
+    (40.4100, 49.8800, 0.020, 0.028, 0.15),   # mid belt (Narimanov / Ganjlik)
+    (40.4050, 49.8100, 0.014, 0.016, 0.10),   # Yasamal / purple-line corridor
+    (40.4489, 49.7550, 0.016, 0.020, 0.08),   # Khirdalan / Absheron
+    (40.5897, 49.6686, 0.018, 0.022, 0.06),   # Sumgait
+    (40.4200, 50.0100, 0.025, 0.035, 0.05),   # Surakhani / Hovsan / outer east
+    (40.4950, 50.1200, 0.015, 0.025, 0.04),   # Sea Breeze / Nardaran (premium)
 ]
 
-_ROOM_PROBS = {1: 0.18, 2: 0.34, 3: 0.30, 4: 0.13, 5: 0.05}
+_ROOM_PROBS = {1: 0.05, 2: 0.40, 3: 0.39, 4: 0.13, 5: 0.03}
 
 _TITLE_TMPL = "{rooms}-otaqlı mənzil, {area} m², {district}"
 _DESC_TMPL = (
@@ -122,15 +124,18 @@ def generate_listings(
     rooms = rng.choice(
         list(_ROOM_PROBS), size=n_total, p=list(_ROOM_PROBS.values())
     ).astype(int)
-    area = np.clip(rng.normal(38 + 24 * rooms, 9), 25, 350).round(1)
+    # Area distribution: right-skewed, matching real data (median ~85, p75~124, p90~171)
+    area_base = np.clip(rng.lognormal(np.log(30 + 22 * rooms), 0.35, size=n_total), 25, 400).round(1)
+    area = area_base
     building_floors = rng.choice(
-        [5, 9, 12, 16, 20], size=n_total, p=[0.25, 0.30, 0.20, 0.15, 0.10]
+        [5, 9, 12, 15, 17, 20, 25, 33], size=n_total,
+        p=[0.08, 0.12, 0.14, 0.20, 0.18, 0.15, 0.10, 0.03],
     )
     floor = (rng.uniform(size=n_total) * building_floors).astype(int) + 1
 
     dist_centre = haversine_km(lat, lon, *config.CITY_CENTRE)
-    # New construction is likelier away from the historic centre.
-    p_new = np.clip(0.18 + 0.03 * dist_centre, 0.18, 0.65)
+    # New construction dominates in Baku (~84% of active listings).
+    p_new = np.clip(0.90 - 0.01 * dist_centre, 0.60, 0.95)
     is_new = rng.uniform(size=n_total) < p_new
     building_type = np.where(is_new, "new", "old")
 

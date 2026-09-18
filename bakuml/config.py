@@ -179,10 +179,10 @@ FORECAST_HORIZONS = (12, 24)
 # Market anchors (used by the synthetic generator and sanity checks)
 # ---------------------------------------------------------------------------
 
-PRICE_CENTRE_AZN_M2 = 3200.0     # elite centre: 3,000+ AZN/m^2
-PRICE_PERIPHERY_AZN_M2 = 1500.0  # periphery: ~1,500-1,800 AZN/m^2
-PRICE_FLOOR_AZN_M2 = 700.0       # bottom of the observed market
-PRICE_CAP_AZN_M2 = 7500.0        # 7,000+ AZN/m^2 top of the market
+PRICE_CENTRE_AZN_M2 = 3500.0     # elite centre: Nizami/28 May/Sahil ~3,500
+PRICE_PERIPHERY_AZN_M2 = 1300.0  # periphery: Absheron/outer suburbs ~1,300
+PRICE_FLOOR_AZN_M2 = 580.0       # bottom of the observed market
+PRICE_CAP_AZN_M2 = 9500.0        # luxury Sea Breeze / Nardaran penthouses
 
 # ---------------------------------------------------------------------------
 # Administrative districts (approximate centroids) - used to attach a
@@ -190,19 +190,59 @@ PRICE_CAP_AZN_M2 = 7500.0        # 7,000+ AZN/m^2 top of the market
 # ---------------------------------------------------------------------------
 
 DISTRICT_CENTRES: dict[str, tuple[float, float]] = {
-    "Sabail": (40.3610, 49.8370),
-    "Nasimi": (40.3840, 49.8300),
+    # Central Baku
+    "28 May": (40.3795, 49.8490),
+    "Sahil": (40.3690, 49.8440),
+    "Səbail": (40.3610, 49.8370),
+    "İçəri Şəhər": (40.3660, 49.8340),
+    "Nəsimi": (40.3840, 49.8300),
+    "Nizami": (40.3780, 49.8210),
     "Yasamal": (40.3820, 49.8120),
-    "Narimanov": (40.4030, 49.8700),
-    "Nizami": (40.4150, 49.9300),
-    "Khatai": (40.3830, 49.9490),
-    "Binagadi": (40.4520, 49.8080),
-    "Sabunchu": (40.4430, 49.9470),
-    "Surakhani": (40.4120, 50.0050),
-    "Garadagh": (40.3242, 49.7301),
-    "Khazar": (40.4720, 50.1060),
-    "Absheron": (40.4489, 49.7550),
-    "Sumgait": (40.5897, 49.6686),
+    "Yeni Yasamal": (40.3950, 49.8020),
+    # Inner suburbs
+    "Nəriman Nərimanov": (40.4030, 49.8700),
+    "Nərimanov": (40.4080, 49.8650),
+    "Gənclik": (40.4020, 49.8520),
+    "Şah İsmayıl Xətai": (40.3830, 49.9490),
+    "Xətai": (40.3900, 49.9350),
+    "Elmlər Akademiyası": (40.3720, 49.8630),
+    "Koroğlu": (40.4100, 49.8820),
+    "İnşaatçılar": (40.4000, 49.8950),
+    "Memar Əcəmi": (40.4090, 49.8120),
+    "Bakmil": (40.4150, 49.8250),
+    "Dərnəgül": (40.4200, 49.8150),
+    # Outer suburbs
+    "Həzi Aslanov": (40.3730, 49.9520),
+    "Əhmədli": (40.3850, 49.9700),
+    "Neftçilər": (40.3980, 49.9400),
+    "Qara Qarayev": (40.4100, 49.9300),
+    "20 Yanvar": (40.4050, 49.9100),
+    "Azadlıq Prospekti": (40.4200, 49.9500),
+    "Binəqədi": (40.4520, 49.8080),
+    "Bakıxanov": (40.4350, 49.9300),
+    "Sabunçu": (40.4430, 49.9470),
+    "Suraxanı": (40.4120, 50.0050),
+    "Hövsan": (40.4250, 50.0300),
+    "Yeni Günəşli": (40.3990, 49.9650),
+    "Köhnə Günəşli": (40.3970, 49.9550),
+    # Periphery & Absheron
+    "Badamdar": (40.3550, 49.8100),
+    "Bayıl": (40.3500, 49.8250),
+    "Şıxov": (40.3350, 49.8350),
+    "Abşeron": (40.4489, 49.7550),
+    "Masazır": (40.4700, 49.7400),
+    "Biləcəri": (40.4600, 49.7900),
+    "Qaradağ": (40.3242, 49.7301),
+    "Lökbatan": (40.3800, 49.7350),
+    "Qaraçuxur": (40.4300, 49.9800),
+    "Zığ": (40.4400, 50.0100),
+    "Xəzər": (40.4720, 50.1060),
+    "Nardaran": (40.5580, 50.0100),
+    # Premium
+    "Sea Breeze": (40.4950, 50.1800),
+    "Ağ şəhər": (40.3600, 49.8600),
+    # Sumgait
+    "Sumqayıt": (40.5897, 49.6686),
 }
 
 # ---------------------------------------------------------------------------
@@ -255,7 +295,7 @@ class SyntheticTruth:
     seed: int = 20240 + 3  # Group 3
     n_listings_per_month: int = 800
     # log-price decay: price = centre * exp(-decay * dist_km) floored at periphery
-    centre_decay_per_km: float = 0.075
+    centre_decay_per_km: float = 0.065
     # Static premium (log points) within 0.8 km of an operational metro station.
     metro_premium_log: float = 0.06
     metro_premium_radius_km: float = 0.8
@@ -269,11 +309,11 @@ class SyntheticTruth:
     # proximity, phased in over the second half of the panel.
     polycentric_trend_log: float = 0.006
     # New-construction premium (log points).
-    new_building_premium_log: float = 0.22
+    new_building_premium_log: float = 0.25
     # Redevelopment-zone discount (log points; demolition uncertainty).
     redev_zone_discount_log: float = -0.05
     # Idiosyncratic noise (std of log price).
-    noise_log_std: float = 0.10
+    noise_log_std: float = 0.18
     # Share of listings that are broker duplicates of another listing.
     duplicate_share: float = 0.06
 

@@ -56,5 +56,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/map.js') }}"></script>
+<script src="{{ url_for('static', filename='js/map.js') }}?v={{ range(100000) | random }}"></script>
 {% endblock %}

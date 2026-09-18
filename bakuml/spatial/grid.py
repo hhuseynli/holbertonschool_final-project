@@ -37,7 +37,7 @@ Where this module does touch h3 directly it uses the v4 API exclusively.
 from __future__ import annotations
 
 import pandas as pd
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon, mapping, shape
 
 from bakuml import config
 from bakuml.data.schema import PANEL_BASE_COLUMNS, validate_panel
@@ -200,6 +200,11 @@ def cells_to_geojson(
     for cell in cells:
         ring = [[lng, lat] for lat, lng in tess.boundary(cell)]
         ring.append(list(ring[0]))  # close the ring
+        cell_poly = Polygon(ring)
+        # Clip to land so coastal cells don't extend into the Caspian
+        clipped = cell_poly.intersection(_LAND_POLY)
+        if clipped.is_empty:
+            continue
         props = {"h3": cell}
         if properties and cell in properties:
             props.update(properties[cell])
@@ -207,7 +212,7 @@ def cells_to_geojson(
             {
                 "type": "Feature",
                 "id": cell,
-                "geometry": {"type": "Polygon", "coordinates": [ring]},
+                "geometry": mapping(clipped),
                 "properties": props,
             }
         )

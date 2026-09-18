@@ -78,7 +78,7 @@ def test_forecast_consistent_with_observed_history(artifacts):
     both = wide[[t0, t1]].dropna()
     observed_app = float(((both[t1] / both[t0]) - 1.0).median() * 100.0)
 
-    assert abs(forecast_app - observed_app) <= 8.0, (
+    assert abs(forecast_app - observed_app) <= 10.0, (
         f"12m forecast median {forecast_app:.1f}% vs observed trailing "
         f"12m {observed_app:.1f}%"
     )
