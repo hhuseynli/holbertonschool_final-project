@@ -1,0 +1,13 @@
+[artifact-tool] embedded_font_decode_failed: unsupported CTF scaler type 0x4f54544f
+Inspect result written to file: C:\Users\BAKU\OneDrive\Рабочий стол\SITE-hw03\homework-3-team-70\holbertonschool_final-project\.presentation-build\candidate.pptx.inspect.ndjson
+exported candidate
+file:///C:/Users/BAKU/.codex/plugins/cache/openai-primary-runtime/presentations/26.909.61513/skills/presentations/container_tools/artifact_tool_utils.mjs:371
+    throw new Error("Every source-required native-table owner must have exactly one validation policy");
+          ^
+
+Error: Every source-required native-table owner must have exactly one validation policy
+    at verifyRequiredNativeTableOwners (file:///C:/Users/BAKU/.codex/plugins/cache/openai-primary-runtime/presentations/26.909.61513/skills/presentations/container_tools/artifact_tool_utils.mjs:371:11)
+    at finalizePresentation (file:///C:/Users/BAKU/.codex/plugins/cache/openai-primary-runtime/presentations/26.909.61513/skills/presentations/container_tools/artifact_tool_utils.mjs:866:3)
+    at async file:///C:/Users/BAKU/OneDrive/%D0%A0%D0%B0%D0%B1%D0%BE%D1%87%D0%B8%D0%B9%20%D1%81%D1%82%D0%BE%D0%BB/SITE-hw03/homework-3-team-70/holbertonschool_final-project/.presentation-build/build.mjs:174:15
+
+Node.js v24.19.0

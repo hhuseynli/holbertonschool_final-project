@@ -1,0 +1,574 @@
+1 [
+  { id: '4', t: 'Simple Dark Mode \nPresentation', pos: e {} },
+  { id: '5', t: 'Lorem ipsum dolor\nLorem ipsum dolor', pos: e {} },
+  { id: '6', t: 'Supertitle', pos: e {} }
+] images 1 charts 0
+2 [
+  { id: '4', t: 'Presentation \nheadline goes here', pos: e {} },
+  { id: '6', t: 'Supertitle', pos: e {} },
+  { id: '8', t: 'Supertitle', pos: e {} }
+] images 0 charts 0
+3 [
+  { id: '5', t: '', pos: e {} },
+  { id: '2', t: '3', pos: e {} },
+  { id: '3', t: 'Today’s Agenda', pos: e {} }
+] images 0 charts 0
+4 [
+  {
+    id: '534',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  { id: '6', t: '', pos: e {} },
+  { id: '532', t: '4', pos: e {} },
+  { id: '533', t: 'Two column layout', pos: e {} },
+  {
+    id: '2',
+    t: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellente',
+    pos: e {}
+  }
+] images 0 charts 0
+5 [
+  { id: '3', t: '', pos: e {} },
+  { id: '532', t: '5', pos: e {} },
+  { id: '533', t: 'Two column layout', pos: e {} },
+  {
+    id: '7',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  {
+    id: '8',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  }
+] images 0 charts 0
+6 [
+  { id: '4', t: '', pos: e {} },
+  { id: '532', t: '6', pos: e {} },
+  { id: '533', t: 'Three column layout', pos: e {} },
+  {
+    id: '534',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  {
+    id: '2',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  {
+    id: '3',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  }
+] images 0 charts 0
+7 [
+  { id: '4', t: '', pos: e {} },
+  { id: '532', t: '7', pos: e {} },
+  { id: '533', t: 'Three column layout', pos: e {} },
+  {
+    id: '5',
+    t: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellente',
+    pos: e {}
+  },
+  {
+    id: '6',
+    t: 'Nulla tempor ut massa elementum dapibus. Nam non ante quis enim f',
+    pos: e {}
+  },
+  {
+    id: '7',
+    t: 'Nulla tempor ut massa elementum dapibus. Nam non ante quis enim f',
+    pos: e {}
+  },
+  { id: '8', t: '', pos: e {} },
+  { id: '9', t: '', pos: e {} },
+  { id: '10', t: '', pos: e {} }
+] images 0 charts 0
+8 [
+  { id: '5', t: '', pos: e {} },
+  { id: '532', t: '8', pos: e {} },
+  { id: '533', t: 'Half text, half image slide', pos: e {} },
+  {
+    id: '8',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  }
+] images 1 charts 0
+9 [
+  { id: '2', t: '', pos: e {} },
+  { id: '532', t: '9', pos: e {} },
+  {
+    id: '533',
+    t: 'Large message slides with three callouts. Lorem ipsum dolor sit a',
+    pos: e {}
+  },
+  { id: '10', t: '', pos: e {} },
+  { id: '11', t: '', pos: e {} },
+  {
+    id: '12',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  {
+    id: '13',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  { id: '14', t: '', pos: e {} },
+  { id: '15', t: '', pos: e {} },
+  { id: '6', t: '', pos: e {} },
+  {
+    id: '7',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  { id: '8', t: '', pos: e {} },
+  {
+    id: '9',
+    t: 'Topic\nLorem ipsum dolor sit amet, consectetur adipiscing elit. Pe',
+    pos: e {}
+  }
+] images 0 charts 0
+10 [
+  { id: '4', t: '', pos: e {} },
+  { id: '532', t: '10', pos: e {} },
+  { id: '533', t: 'One column layout with checklist ', pos: e {} },
+  {
+    id: '534',
+    t: 'Lorem ipsum dolor sit amet, \nconsectetur adipiscing elit ',
+    pos: e {}
+  },
+  { id: '2', t: 'Lorem ipsum dolor', pos: e {} },
+  { id: '3', t: '', pos: e {} },
+  {
+    id: '12',
+    t: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellente',
+    pos: e {}
+  },
+  { id: '16', t: 'Lorem ipsum dolor', pos: e {} },
+  { id: '17', t: '', pos: e {} },
+  { id: '18', t: 'Lorem ipsum dolor', pos: e {} },
+  { id: '19', t: '', pos: e {} },
+  { id: '20', t: 'Lorem ipsum dolor', pos: e {} },
+  { id: '21', t: '', pos: e {} },
+  { id: '23', t: 'Lorem ipsum dolor', pos: e {} },
+  { id: '24', t: '', pos: e {} }
+] images 0 charts 0
+11 [
+  { id: '5', t: '', pos: e {} },
+  { id: '532', t: '11', pos: e {} },
+  { id: '533', t: 'Intro with two comparison cards', pos: e {} },
+  { id: '2', t: '', pos: e {} },
+  {
+    id: '3',
+    t: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellente',
+    pos: e {}
+  },
+  {
+    id: '4',
+    t: 'Detail goes here\nDetail goes here\nDetail goes here',
+    pos: e {}
+  },
+  { id: '8', t: '', pos: e {} },
+  {
+    id: '11',
+    t: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellente',
+    pos: e {}
+  },
+  {
+    id: '13',
+    t: 'Detail goes here\nDetail goes here\nDetail goes here',
+    pos: e {}
+  },
+  {
+    id: '14',
+    t: 'Topic\nLorem ipsum dolor sit amet, consectetur adipiscing elit. Pe',
+    pos: e {}
+  }
+] images 0 charts 0
+12 [
+  { id: '11', t: '', pos: e {} },
+  { id: '532', t: '12', pos: e {} },
+  { id: '533', t: 'Intro and 2x2 card grid', pos: e {} },
+  { id: '7', t: '', pos: e {} },
+  {
+    id: '8',
+    t: 'Title goes here\nLorem ipsum dolor sit amet, consectetur adipiscin',
+    pos: e {}
+  },
+  { id: '9', t: '', pos: e {} },
+  {
+    id: '10',
+    t: 'Title goes here\nLorem ipsum dolor sit amet, consectetur adipiscin',
+    pos: e {}
+  },
+  { id: '2', t: '', pos: e {} },
+  {
+    id: '3',
+    t: 'Title goes here\nLorem ipsum dolor sit amet, consectetur adipiscin',
+    pos: e {}
+  },
+  { id: '4', t: '', pos: e {} },
+  {
+    id: '5',
+    t: 'Title goes here\nLorem ipsum dolor sit amet, consectetur adipiscin',
+    pos: e {}
+  },
+  {
+    id: '6',
+    t: 'Topic\nLorem ipsum dolor sit amet, consectetur adipiscing elit. Pe',
+    pos: e {}
+  }
+] images 0 charts 0
+13 [
+  { id: '6', t: '', pos: e {} },
+  { id: '2', t: '13', pos: e {} },
+  { id: '3', t: 'Four points grid layout ', pos: e {} },
+  {
+    id: '10',
+    t: 'Title goes here\nLorem ipsum dolor sit amet, consectetur adipiscin',
+    pos: e {}
+  },
+  {
+    id: '11',
+    t: 'Title goes here\nLorem ipsum dolor sit amet, consectetur adipiscin',
+    pos: e {}
+  },
+  {
+    id: '4',
+    t: 'Title goes here\nLorem ipsum dolor sit amet, consectetur adipiscin',
+    pos: e {}
+  },
+  {
+    id: '5',
+    t: 'Title goes here\nLorem ipsum dolor sit amet, consectetur adipiscin',
+    pos: e {}
+  }
+] images 0 charts 0
+14 [
+  { id: '3', t: '', pos: e {} },
+  { id: '532', t: '14', pos: e {} },
+  { id: '533', t: 'Intro and data table', pos: e {} },
+  {
+    id: '14',
+    t: 'Topic\nLorem ipsum dolor sit amet, consectetur adipiscing elit. Pe',
+    pos: e {}
+  }
+] images 0 charts 0
+15 [
+  { id: '2', t: '', pos: e {} },
+  { id: '532', t: '15', pos: e {} },
+  { id: '533', t: 'Intro with four topics', pos: e {} },
+  {
+    id: '12',
+    t: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellente',
+    pos: e {}
+  },
+  { id: '15', t: 'Item or topic \ntitle goes here', pos: e {} },
+  {
+    id: '16',
+    t: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellente',
+    pos: e {}
+  },
+  { id: '17', t: 'Item or topic \ntitle goes here', pos: e {} },
+  {
+    id: '18',
+    t: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellente',
+    pos: e {}
+  },
+  { id: '19', t: 'Item or topic \ntitle goes here', pos: e {} },
+  {
+    id: '20',
+    t: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellente',
+    pos: e {}
+  },
+  { id: '21', t: 'Item or topic \ntitle goes here', pos: e {} },
+  {
+    id: '3',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  }
+] images 0 charts 0
+16 [
+  { id: '7', t: '', pos: e {} },
+  { id: '4', t: '16', pos: e {} },
+  { id: '11', t: 'Four column layout with eight topics', pos: e {} },
+  {
+    id: '2',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  {
+    id: '3',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  {
+    id: '5',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  {
+    id: '6',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  {
+    id: '28',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  {
+    id: '29',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  {
+    id: '30',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  {
+    id: '31',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  }
+] images 0 charts 0
+17 [
+  { id: '7', t: '', pos: e {} },
+  { id: '4', t: '17', pos: e {} },
+  {
+    id: '11',
+    t: 'Timeline with three text only milestones',
+    pos: e {}
+  },
+  { id: '2', t: '', pos: e {} },
+  { id: '3', t: '', pos: e {} },
+  { id: '5', t: '', pos: e {} },
+  { id: '6', t: '', pos: e {} },
+  { id: '9', t: 'Date', pos: e {} },
+  { id: '13', t: 'Date', pos: e {} },
+  { id: '14', t: 'Date', pos: e {} },
+  {
+    id: '8',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  {
+    id: '15',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  {
+    id: '19',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  }
+] images 0 charts 0
+18 [
+  { id: '7', t: '', pos: e {} },
+  { id: '4', t: '18', pos: e {} },
+  { id: '11', t: 'Timeline with three card milestones', pos: e {} },
+  { id: '2', t: '', pos: e {} },
+  { id: '3', t: '', pos: e {} },
+  { id: '5', t: '', pos: e {} },
+  { id: '6', t: '', pos: e {} },
+  { id: '20', t: '', pos: e {} },
+  {
+    id: '21',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  { id: '22', t: '', pos: e {} },
+  {
+    id: '23',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  { id: '24', t: '', pos: e {} },
+  {
+    id: '25',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  { id: '8', t: 'Date', pos: e {} },
+  { id: '12', t: 'Date', pos: e {} },
+  { id: '13', t: 'Date', pos: e {} }
+] images 0 charts 0
+19 [
+  { id: '6', t: '', pos: e {} },
+  { id: '7', t: '', pos: e {} },
+  { id: '8', t: '', pos: e {} },
+  { id: '2', t: '19', pos: e {} },
+  {
+    id: '3',
+    t: 'Topic description and three large stat cards layout',
+    pos: e {}
+  },
+  {
+    id: '10',
+    t: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit.',
+    pos: e {}
+  },
+  {
+    id: '11',
+    t: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit.',
+    pos: e {}
+  },
+  {
+    id: '12',
+    t: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit.',
+    pos: e {}
+  },
+  { id: '13', t: '12%', pos: e {} },
+  { id: '4', t: '34%', pos: e {} },
+  { id: '5', t: '56%', pos: e {} },
+  {
+    id: '14',
+    t: 'Topic\nLorem ipsum dolor sit amet, consectetur adipiscing elit. Pe',
+    pos: e {}
+  },
+  { id: '9', t: '', pos: e {} }
+] images 0 charts 0
+20 [
+  { id: '5', t: '', pos: e {} },
+  { id: '532', t: '20', pos: e {} },
+  { id: '533', t: 'Chart with three cards', pos: e {} },
+  { id: '7', t: '', pos: e {} },
+  {
+    id: '8',
+    t: 'Title goes here\nLorem ipsum dolor sit amet, consectetur adipiscin',
+    pos: e {}
+  },
+  { id: '9', t: '', pos: e {} },
+  {
+    id: '10',
+    t: 'Title goes here\nLorem ipsum dolor sit amet, consectetur adipiscin',
+    pos: e {}
+  },
+  { id: '2', t: '', pos: e {} },
+  {
+    id: '3',
+    t: 'Title goes here\nLorem ipsum dolor sit amet, consectetur adipiscin',
+    pos: e {}
+  }
+] images 0 charts 1
+21 [
+  { id: '5', t: '', pos: e {} },
+  { id: '4', t: '21', pos: e {} },
+  { id: '11', t: 'Line chart with two stat callout cards', pos: e {} },
+  { id: '37', t: '', pos: e {} },
+  { id: '38', t: '12%', pos: e {} },
+  {
+    id: '39',
+    t: 'Lorem ipsum dolor \nsit amet, consectetur',
+    pos: e {}
+  },
+  { id: '40', t: '', pos: e {} },
+  { id: '41', t: '12%', pos: e {} },
+  {
+    id: '42',
+    t: 'Lorem ipsum dolor \nsit amet, consectetur',
+    pos: e {}
+  },
+  {
+    id: '43',
+    t: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Pellente',
+    pos: e {}
+  }
+] images 0 charts 1
+22 [
+  { id: '10', t: '', pos: e {} },
+  { id: '4', t: '22', pos: e {} },
+  {
+    id: '11',
+    t: 'Column chart with text and two stat callouts',
+    pos: e {}
+  },
+  { id: '38', t: '12%', pos: e {} },
+  {
+    id: '39',
+    t: 'Lorem ipsum dolor \nsit amet, consectetur',
+    pos: e {}
+  },
+  { id: '41', t: '12%', pos: e {} },
+  {
+    id: '42',
+    t: 'Lorem ipsum dolor \nsit amet, consectetur',
+    pos: e {}
+  },
+  { id: '2', t: '', pos: e {} },
+  {
+    id: '6',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  }
+] images 0 charts 1
+23 [
+  { id: '3', t: '', pos: e {} },
+  { id: '4', t: '23', pos: e {} },
+  { id: '8', t: 'Three column pricing layout', pos: e {} },
+  { id: '5', t: '', pos: e {} },
+  { id: '15', t: 'Starting from', pos: e {} },
+  { id: '16', t: '$234', pos: e {} },
+  { id: '17', t: '/ per month', pos: e {} },
+  { id: '19', t: '', pos: e {} },
+  { id: '2', t: '', pos: e {} },
+  {
+    id: '6',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  { id: '7', t: 'Starting from', pos: e {} },
+  { id: '10', t: '$234', pos: e {} },
+  { id: '11', t: '/ per month', pos: e {} },
+  { id: '12', t: '', pos: e {} },
+  { id: '13', t: '', pos: e {} },
+  {
+    id: '14',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  },
+  { id: '18', t: 'Starting from', pos: e {} },
+  { id: '20', t: '$234', pos: e {} },
+  { id: '21', t: '/ per month', pos: e {} },
+  { id: '22', t: '', pos: e {} },
+  {
+    id: '9',
+    t: 'Title here\nLorem ipsum dolor sit amet, consectetur adipiscing eli',
+    pos: e {}
+  }
+] images 0 charts 0
+24 [
+  { id: '11', t: '', pos: e {} },
+  { id: '532', t: '24', pos: e {} },
+  { id: '533', t: 'Gantt chart over time', pos: e {} },
+  { id: '5', t: 'Lorem ipsum', pos: e {} },
+  { id: '6', t: 'Lorem ipsum', pos: e {} },
+  { id: '7', t: 'Lorem ipsum', pos: e {} },
+  { id: '8', t: 'Lorem ipsum', pos: e {} },
+  { id: '9', t: 'Lorem ipsum', pos: e {} },
+  { id: '10', t: 'Lorem ipsum', pos: e {} }
+] images 0 charts 0
+25 [
+  { id: '23', t: '', pos: e {} },
+  { id: '532', t: '25', pos: e {} },
+  { id: '533', t: 'Calendar grid with milestones', pos: e {} },
+  { id: '2', t: 'Milestone', pos: e {} },
+  { id: '5', t: 'Milestone', pos: e {} },
+  { id: '6', t: 'Milestone', pos: e {} },
+  { id: '9', t: 'Milestone', pos: e {} },
+  { id: '10', t: 'Milestone', pos: e {} },
+  { id: '14', t: 'Milestone', pos: e {} }
+] images 0 charts 0
+26 [
+  { id: '4', t: 'Thank you', pos: e {} },
+  {
+    id: '5',
+    t: 'Lorem ipsum details\nLorem ipsum details\nLorem ipsum details',
+    pos: e {}
+  },
+  { id: '6', t: 'Supertitle', pos: e {} }
+] images 0 charts 0
