@@ -37,10 +37,28 @@ function scoreClass(score) {
     return 'score-low';
 }
 
+function placeholderSvg(listing) {
+    // Deterministic colour from listing id hash
+    let h = 0;
+    const id = listing.listing_id || '';
+    for (let i = 0; i < id.length; i++) h = ((h << 5) - h + id.charCodeAt(i)) | 0;
+    const hue = ((h % 360) + 360) % 360;
+    const isNew = listing.building_type === 'new';
+    const sat = isNew ? '45%' : '30%';
+    const c1 = `hsl(${hue}, ${sat}, 35%)`;
+    const c2 = `hsl(${(hue + 40) % 360}, ${sat}, 50%)`;
+    const rooms = listing.rooms || '?';
+    const area = listing.area_m2 ? listing.area_m2 + ' m\u00B2' : '';
+    const type = isNew ? 'New build' : 'Old build';
+    const district = (listing.district || '').substring(0, 18);
+    return `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="${c1}"/><stop offset="100%" stop-color="${c2}"/></linearGradient></defs><rect width="400" height="260" fill="url(#g)"/><text x="200" y="90" text-anchor="middle" fill="rgba(255,255,255,0.9)" font-family="system-ui,sans-serif" font-size="48" font-weight="700">${rooms} rm</text><text x="200" y="140" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-family="system-ui,sans-serif" font-size="22">${area}</text><text x="200" y="175" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-family="system-ui,sans-serif" font-size="18">${type}</text><text x="200" y="210" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-family="system-ui,sans-serif" font-size="16">${district}</text></svg>`)}`;
+}
+
 function renderCard(listing) {
     const a = listing.analytics || {};
     const score = a.investment_score || 0;
     const photo = (listing.photos && listing.photos.length > 0) ? listing.photos[0] : null;
+    const imgSrc = photo || placeholderSvg(listing);
     const appreciation = a.appreciation_12m_pct;
 
     let tags = '';
@@ -60,7 +78,7 @@ function renderCard(listing) {
     return `
         <a href="/listing/${listing.listing_id}" class="listing-card">
             <div class="card-image">
-                ${photo ? `<img src="${photo}" alt="" onerror="this.parentElement.innerHTML='No photo'">` : 'No photo'}
+                <img src="${imgSrc}" alt="" onerror="this.parentElement.innerHTML='No photo'">
                 <span class="card-score ${scoreClass(score)}">${score}</span>
             </div>
             <div class="card-body">
