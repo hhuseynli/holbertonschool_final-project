@@ -11,12 +11,15 @@ dist/
 .venv/
 venv/
 
-# Project data & artifacts (regenerate with `make demo`)
+# Project data (regenerate with `make demo`)
 /data/
-/artifacts/
-*.parquet
 *.pt
 *.joblib
+
+# Scraped data (large, not committed)
+/artifacts/bina_full.parquet
+/artifacts/bina_scraped.parquet
+/artifacts/bina_live_test.parquet
 
 # Notebooks / editors
 .ipynb_checkpoints/

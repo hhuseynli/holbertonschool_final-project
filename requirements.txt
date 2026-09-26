@@ -17,6 +17,7 @@ shapely>=2.0
 
 # Visualisation / web app
 flask>=3.0
+gunicorn>=21.2
 folium>=0.15
 branca>=0.7
 plotly>=5.18

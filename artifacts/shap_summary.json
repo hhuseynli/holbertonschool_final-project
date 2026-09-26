@@ -1,0 +1,17 @@
+{
+  "dist_centre_km": 507.3101501464844,
+  "month_ix": 137.19012451171875,
+  "nbr_price_prev_month": 104.41293334960938,
+  "dist_treatment_km": 86.81512451171875,
+  "lag_own_1m": 66.02059173583984,
+  "dist_node_lokbatan_km": 56.21172332763672,
+  "mom_3m": 36.89393997192383,
+  "lag_own_3m": 35.12724304199219,
+  "dist_node_alat_km": 23.880434036254883,
+  "dist_node_sumgait_km": 22.766544342041016,
+  "dist_nearest_node_km": 21.588518142700195,
+  "dist_metro_km": 21.209672927856445,
+  "n_listings_prev_month": 16.13858985900879,
+  "new_share_prev_month": 15.861471176147461,
+  "dist_node_zigh_hovsan_km": 15.76345443725586
+}
