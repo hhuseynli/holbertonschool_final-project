@@ -27,7 +27,8 @@ def create_app() -> Flask:
     enricher = ListingEnricher(ARTIFACTS_DIR)
     arts = enricher.arts
     listings_df = _load_listings(ARTIFACTS_DIR)
-    listings_raw = _df_to_listings(listings_df)
+    photo_pool = _load_photo_pool(ARTIFACTS_DIR)
+    listings_raw = _df_to_listings(listings_df, photo_pool)
 
     # Enrich all listings with analytics
     listings = [enricher.enrich(l) for l in listings_raw]
@@ -237,7 +238,17 @@ def _load_listings(artifacts_dir: Path) -> pd.DataFrame:
     return pd.DataFrame(columns=list(LISTING_COLUMNS))
 
 
-def _df_to_listings(df: pd.DataFrame) -> list[dict]:
+def _load_photo_pool(artifacts_dir: Path) -> dict[str, list[str]]:
+    """Load the bina.az photo pool keyed by '{rooms}_{building_type}'."""
+    import json as _json
+
+    path = artifacts_dir / "photo_pool.json"
+    if path.is_file():
+        return _json.loads(path.read_text())
+    return {}
+
+
+def _df_to_listings(df: pd.DataFrame, photo_pool: dict | None = None) -> list[dict]:
     """Convert listings DataFrame to list of dicts with photo URLs."""
     records = []
     for _, row in df.iterrows():
@@ -257,6 +268,14 @@ def _df_to_listings(df: pd.DataFrame) -> list[dict]:
             d["photos"] = _json.loads(raw) if isinstance(raw, str) else (raw or [])
         except (ValueError, TypeError):
             d["photos"] = []
+        # Assign a bina.az photo from the pool if listing has none
+        if not d["photos"] and photo_pool:
+            rooms = min(int(d.get("rooms") or 2), 5)
+            bt = d.get("building_type") or "old"
+            bucket = photo_pool.get(f"{rooms}_{bt}", [])
+            if bucket:
+                idx = hash(d.get("listing_id", "")) % len(bucket)
+                d["photos"] = [bucket[idx]]
         records.append(d)
     return records
 
