@@ -56,20 +56,38 @@ BBOX = (40.28, 40.66, 49.55, 50.25)
 EARTH_RADIUS_KM = 6371.0088
 
 # Simplified Absheron + Baku + Sumgait land polygon (lon, lat vertices,
-# clockwise). Traced from the OpenStreetMap coastline with a generous
-# buffer (~200 m) so that H3 res-8 cell centroids near the shore are
-# still classified as land. Used by `spatial.grid.filter_land_cells` to
-# drop hexagons whose centroids fall in the Caspian Sea.
+# clockwise). Traced from the OpenStreetMap coastline with a ~300 m
+# buffer on the western/northern edges and a tighter trace on the
+# eastern/southern Absheron coast, where the peninsula narrows and
+# axis-aligned KD-tree cells would otherwise extend visibly into the
+# Caspian. Used by `spatial.grid.filter_land_cells` to drop cells
+# whose centroids fall at sea, and by `cells_to_geojson` to clip cell
+# polygons to the coastline.
 LAND_POLYGON_LONLAT: list[tuple[float, float]] = [
-    (49.35, 40.68), (49.55, 40.68), (49.65, 40.66), (49.72, 40.65),
-    (49.75, 40.64), (49.85, 40.63), (49.95, 40.60), (50.00, 40.58),
-    (50.05, 40.56), (50.10, 40.55), (50.15, 40.54), (50.18, 40.52),
-    (50.20, 40.50), (50.24, 40.48), (50.27, 40.45), (50.24, 40.41),
-    (50.20, 40.38), (50.15, 40.34), (50.10, 40.32), (50.05, 40.31),
-    (50.00, 40.30), (49.95, 40.29), (49.90, 40.28), (49.85, 40.28),
-    (49.80, 40.28), (49.75, 40.27), (49.70, 40.26), (49.60, 40.25),
-    (49.50, 40.25), (49.40, 40.25), (49.35, 40.25), (49.35, 40.40),
-    (49.35, 40.55), (49.35, 40.68),
+    # North coast, west to east (Sumgait → Bilgah). The coastline
+    # curves south between Sumgait and Bilgah; coordinates are ~300 m
+    # seaward of the northernmost listings at each longitude.
+    (49.35, 40.65), (49.50, 40.65), (49.55, 40.65), (49.60, 40.65),
+    (49.65, 40.65), (49.72, 40.64), (49.75, 40.62), (49.80, 40.59),
+    (49.85, 40.58), (49.90, 40.57), (49.95, 40.57), (50.00, 40.56),
+    (50.05, 40.55), (50.10, 40.55), (50.15, 40.54), (50.18, 40.52),
+    # Peninsula tip (Mardakan → Sea Breeze)
+    (50.20, 40.51), (50.21, 40.50), (50.22, 40.49),
+    # East coast, south along the narrowing peninsula
+    (50.21, 40.48), (50.19, 40.47), (50.17, 40.46),
+    (50.16, 40.45), (50.14, 40.44), (50.13, 40.43),
+    (50.12, 40.42), (50.11, 40.41), (50.11, 40.40),
+    # South coast (Hovsan → Sangachal) — stays east because the mainland
+    # coast runs roughly north-south here before curving southwest.
+    (50.11, 40.39), (50.10, 40.38), (50.08, 40.37),
+    (50.07, 40.36), (50.07, 40.35), (50.06, 40.34),
+    (50.06, 40.33), (50.04, 40.32), (50.00, 40.31),
+    # Southwest coast
+    (49.95, 40.30), (49.90, 40.29), (49.80, 40.28),
+    (49.75, 40.27), (49.70, 40.26), (49.60, 40.25),
+    (49.50, 40.25), (49.40, 40.25), (49.35, 40.25),
+    # West edge back to start
+    (49.35, 40.40), (49.35, 40.55), (49.35, 40.68),
 ]
 
 # ---------------------------------------------------------------------------
