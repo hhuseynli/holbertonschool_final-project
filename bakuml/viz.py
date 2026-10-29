@@ -216,6 +216,10 @@ def hex_layer_geojson(
 
 def _subset_geometry(geometry: dict, cells: list[str], properties: dict) -> dict:
     """Take the stored polygons for `cells` and attach metric properties."""
+    from shapely.geometry import mapping, shape
+    from shapely.geometry import Polygon as ShapelyPolygon
+
+    land = ShapelyPolygon(config.LAND_POLYGON_LONLAT)
     by_id = {
         feat.get("id") or (feat.get("properties") or {}).get("h3"): feat
         for feat in geometry.get("features", [])
@@ -223,13 +227,17 @@ def _subset_geometry(geometry: dict, cells: list[str], properties: dict) -> dict
     features = []
     for cell in cells:
         feat = by_id.get(cell)
-        if feat is None:  # cell absent from the stored geometry - skip it
+        if feat is None:
+            continue
+        geom = shape(feat["geometry"])
+        clipped = geom.intersection(land)
+        if clipped.is_empty:
             continue
         features.append(
             {
                 "type": "Feature",
                 "id": cell,
-                "geometry": feat["geometry"],
+                "geometry": mapping(clipped),
                 "properties": {"h3": cell, **properties.get(cell, {})},
             }
         )
