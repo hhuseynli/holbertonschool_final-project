@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-import h3
 import numpy as np
 import pandas as pd
 from flask import Flask, abort, jsonify, render_template, request
